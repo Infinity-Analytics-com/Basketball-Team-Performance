@@ -22,7 +22,7 @@ export function LoginPage() {
       }
       navigate("/player");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not load data from Google Sheets");
+      setError(err instanceof Error ? err.message : "Unable to load data. Please check your API key or connection.");
     } finally {
       setLoadingRole(null);
     }

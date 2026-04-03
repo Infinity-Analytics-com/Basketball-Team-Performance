@@ -105,3 +105,4 @@ function toSortableNumber(value: unknown): number | null {
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : null;
 }
+

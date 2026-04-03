@@ -1,14 +1,29 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { AppShell } from "@/components/Layout";
 import { LoadingCard } from "@/components/LoadingCard";
+import { SortableTable, type SortableTableColumn } from "@/components/SortableTable";
 import { useAuth } from "@/auth/AuthContext";
 import { getSnapshot, refreshSnapshot, SNAPSHOT_CACHE_UPDATED_EVENT } from "@/api/client";
 import { canViewPlayer } from "@/rbac/permissions";
-import type { SnapshotResponse } from "@/types";
+import type { MatchStatRecord, SnapshotResponse } from "@/types";
 
-const cardOrder = ["overall", "attack", "transition", "defence", "kickouts", "ourKickouts", "oppKickouts"];
-const featuredCards = new Set(["overall", "attack"]);
+const DATA_ERROR_MESSAGE = "Unable to load data. Please check your API key or connection.";
+
+type BreakdownRow = {
+  key: string;
+  matchLabel: string;
+  date: string;
+  minutes: number;
+  points: number;
+  goals: number;
+  tackles: number;
+  simplePass: number;
+  advancePass: number;
+  carries: number;
+  turnovers: number;
+  assists: number;
+};
 
 export function PlayerProfilePage() {
   const { playerId } = useParams();
@@ -21,11 +36,10 @@ export function PlayerProfilePage() {
   useEffect(() => {
     if (!session) return;
     const load = () => {
-      setSnapshot(null);
       setError(null);
       getSnapshot(session)
         .then(setSnapshot)
-        .catch((err) => setError(err instanceof Error ? err.message : "Could not load cached player profile"));
+        .catch((err) => setError(err instanceof Error ? err.message : DATA_ERROR_MESSAGE));
     };
     load();
     const onUpdated = () => load();
@@ -35,9 +49,8 @@ export function PlayerProfilePage() {
 
   useEffect(() => {
     if (!snapshot) return;
-    const nextDefault = snapshot.filters?.defaultOptionId ?? "all";
-    const options = snapshot.filters?.options.map((option) => option.id) ?? ["all"];
-    setActiveFilterId((current) => (options.includes(current) ? current : nextDefault));
+    const options = snapshot.filters.options.map((option) => option.id);
+    setActiveFilterId((current) => (options.includes(current) ? current : snapshot.filters.defaultOptionId));
   }, [snapshot]);
 
   if (!session || !playerId) return null;
@@ -48,12 +61,10 @@ export function PlayerProfilePage() {
   }
 
   if (error) {
-    const isRateLimit = /429|quota|resource_exhausted/i.test(error);
     return (
       <AppShell title="Player Detail">
         <section className="panel fetch-status-card" role="alert">
-          <h2>Player data is unavailable.</h2>
-          <p>{isRateLimit ? "Google Sheets API is rate-limited right now. Please wait a moment and retry." : "Could not load player profile from local cache."}</p>
+          <h2>Unable to load data. Please check your API key or connection.</h2>
           <p className="fetch-status-detail">{error}</p>
           <button type="button" className="fetch-retry-btn" onClick={() => void refreshSnapshot(session)}>
             Refresh Data
@@ -73,36 +84,63 @@ export function PlayerProfilePage() {
     );
   }
 
-  const activePlayerViews = snapshot.filters?.playerViews[activeFilterId] ?? snapshot.playerViews;
-  const filterOptions = snapshot.filters?.options ?? [{ id: "all", label: "All Matches", description: "Combined view across all available matches" }];
-  const fallbackPlayerId = snapshot.visiblePlayerIds[0] ?? Object.keys(activePlayerViews)[0];
-  const view =
-    activePlayerViews[playerId] ??
-    (session.playerId ? activePlayerViews[session.playerId] : undefined) ??
-    (fallbackPlayerId ? activePlayerViews[fallbackPlayerId] : undefined);
+  const allPlayerRecords = snapshot.records.filter((record) => record.playerId === playerId);
+  const filteredRecords = (activeFilterId === "all" ? allPlayerRecords : allPlayerRecords.filter((record) => record.matchId === activeFilterId)).sort(sortByDateThenMatch);
+  const player = snapshot.players[playerId] ?? (allPlayerRecords[0] ? { playerId, name: allPlayerRecords[0].playerName, number: "", position: "" } : null);
 
-  if (!view) {
+  if (!player) {
     return (
       <AppShell title="Player Detail">
-        <div className="panel error">No player data available for this view.</div>
+        <div className="panel error">No player data available for this player.</div>
       </AppShell>
     );
   }
 
-  const cards = cardOrder.map((id) => view.cards.find((c) => c.id === id)).filter((card): card is (typeof view.cards)[number] => Boolean(card));
-  const showBackButton = session.role === "manager" || session.role === "admin";
-  const topSummaryStats = [
-    { label: "Scores For", value: String(view.header.scoresFor) },
-    { label: "Turnovers Against", value: String(view.header.turnoversAgainst) },
-    { label: "Role View", value: session.role === "manager" ? "Team Manager" : session.role === "admin" ? "Admin" : "Player" }
+  const totals = {
+    minutes: sumBy(filteredRecords, (record) => record.totalMinutes),
+    points: sumBy(filteredRecords, (record) => record.pts),
+    goals: sumBy(filteredRecords, (record) => record.goalsScored),
+    tackles: sumBy(filteredRecords, (record) => record.tackles),
+    simplePass: sumBy(filteredRecords, (record) => record.simplePass),
+    advancePass: sumBy(filteredRecords, (record) => record.advancePass),
+    carries: sumBy(filteredRecords, (record) => record.carries),
+    turnovers: sumBy(filteredRecords, (record) => record.turnovers),
+    assists: sumBy(filteredRecords, (record) => record.assists)
+  };
+
+  const breakdownRows: BreakdownRow[] = filteredRecords.map((record) => ({
+    key: record.key,
+    matchLabel: record.matchLabel,
+    date: record.date,
+    minutes: record.totalMinutes,
+    points: record.pts,
+    goals: record.goalsScored,
+    tackles: record.tackles,
+    simplePass: record.simplePass,
+    advancePass: record.advancePass,
+    carries: record.carries,
+    turnovers: record.turnovers,
+    assists: record.assists
+  }));
+
+  const summaryCards = [
+    { label: "Minutes Played", value: totals.minutes },
+    { label: "Points", value: totals.points },
+    { label: "Goals", value: totals.goals },
+    { label: "Tackles", value: totals.tackles },
+    { label: "Simple Pass", value: totals.simplePass },
+    { label: "Advance Pass", value: totals.advancePass },
+    { label: "Carries", value: totals.carries },
+    { label: "Turnovers", value: totals.turnovers },
+    { label: "Assists", value: totals.assists }
   ];
 
+  const showBackButton = session.role === "manager" || session.role === "admin";
   const handleBack = () => {
     if (window.history.length > 1) {
       navigate(-1);
       return;
     }
-
     navigate(session.role === "admin" ? "/admin/users" : "/manager/dashboard");
   };
 
@@ -117,68 +155,86 @@ export function PlayerProfilePage() {
     </button>
   ) : undefined;
 
+  const columns: Array<SortableTableColumn<BreakdownRow>> = [
+    {
+      id: "matchLabel",
+      label: "Match",
+      sortAccessor: (row) => `${row.date}|${row.matchLabel}`,
+      cell: (row) => (
+        <div className="match-cell">
+          <span>{row.matchLabel}</span>
+          <small>{row.date || "-"}</small>
+        </div>
+      )
+    },
+    { id: "minutes", label: "Minutes", sortAccessor: (row) => row.minutes, cell: (row) => formatNumber(row.minutes), headerClassName: "num", cellClassName: "num" },
+    { id: "points", label: "Points", sortAccessor: (row) => row.points, cell: (row) => formatNumber(row.points), headerClassName: "num", cellClassName: "num" },
+    { id: "goals", label: "Goals", sortAccessor: (row) => row.goals, cell: (row) => formatNumber(row.goals), headerClassName: "num", cellClassName: "num" },
+    { id: "tackles", label: "Tackles", sortAccessor: (row) => row.tackles, cell: (row) => formatNumber(row.tackles), headerClassName: "num", cellClassName: "num" },
+    { id: "simplePass", label: "Simple Pass", sortAccessor: (row) => row.simplePass, cell: (row) => formatNumber(row.simplePass), headerClassName: "num", cellClassName: "num" },
+    { id: "advancePass", label: "Advance Pass", sortAccessor: (row) => row.advancePass, cell: (row) => formatNumber(row.advancePass), headerClassName: "num", cellClassName: "num" },
+    { id: "carries", label: "Carries", sortAccessor: (row) => row.carries, cell: (row) => formatNumber(row.carries), headerClassName: "num", cellClassName: "num" },
+    { id: "turnovers", label: "Turnovers", sortAccessor: (row) => row.turnovers, cell: (row) => formatNumber(row.turnovers), headerClassName: "num", cellClassName: "num" },
+    { id: "assists", label: "Assists", sortAccessor: (row) => row.assists, cell: (row) => formatNumber(row.assists), headerClassName: "num", cellClassName: "num" }
+  ];
+
   return (
-    <AppShell title={view.header.playerName} titlePrefix={backIcon}>
+    <AppShell title={player.name} titlePrefix={backIcon}>
       <section className="player-dashboard-hero panel">
         <div className="player-dashboard-copy">
           <p className="player-page-subtitle">Player Detail Dashboard</p>
-          <h2 className="player-dashboard-name">{view.header.playerName}</h2>
-          <p className="player-page-meta">{view.header.subtitle}</p>
+          <h2 className="player-dashboard-name">{player.name}</h2>
+          <p className="player-page-meta">Match-by-match live Google Sheets data</p>
         </div>
-        <div className="player-dashboard-summary">
-          {topSummaryStats.map((item) => (
-            <article key={item.label} className="player-summary-chip">
-              <span>{item.label}</span>
-              <strong>{item.value}</strong>
-            </article>
-          ))}
-        </div>
+        <label className="filter-select-field player-filter-field">
+          <span className="filter-select-label">Match</span>
+          <select className="filter-select" aria-label="Player dashboard match filter" value={activeFilterId} onChange={(event) => setActiveFilterId(event.target.value)}>
+            {snapshot.filters.options.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
       </section>
-      <section className="dashboard-toolbar dashboard-toolbar-player">
-        <div>
-          <p className="toolbar-kicker">Dashboard Filter</p>
-          <h2 className="toolbar-title">Switch between all matches and recent game windows</h2>
-        </div>
-        <div className="filter-chip-group" role="tablist" aria-label="Player dashboard filter">
-          {filterOptions.map((option) => (
-            <button
-              key={option.id}
-              type="button"
-              className={`filter-chip ${activeFilterId === option.id ? "active" : ""}`}
-              onClick={() => setActiveFilterId(option.id)}
-              title={option.description}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-      </section>
-      <div className="player-screen-grid">
-        {cards.map((card) => (
-          <article key={card.id} className={`player-card panel ${featuredCards.has(card.id) ? "player-card-featured" : ""}`}>
-            <header className="player-card-head">
-              <div>
-                <p className="player-card-kicker">Performance Area</p>
-                <h2>{card.title}</h2>
-              </div>
-              <strong>{card.metric}</strong>
-            </header>
-            <div className="metric-lines">
-              {card.lines.map((line) => (
-                <div key={line.label} className="metric-line">
-                  <div className="label-row">
-                    <span>{line.label}</span>
-                    <span>{line.value}</span>
-                  </div>
-                  <div className="bar-track">
-                    <div className="bar-fill" style={{ width: `${Math.round((line.ratio ?? 0.5) * 100)}%` }} />
-                  </div>
-                </div>
-              ))}
-            </div>
+
+      <div className="player-stat-grid">
+        {summaryCards.map((card) => (
+          <article key={card.label} className="player-summary-card panel-inner">
+            <span>{card.label}</span>
+            <strong>{formatNumber(card.value)}</strong>
           </article>
         ))}
       </div>
+
+      <section className="panel player-breakdown-section">
+        <div className="panel-inner player-breakdown-head">
+          <h3>Per-match breakdown</h3>
+          <p>{activeFilterId === "all" ? "Showing every match the player appeared in." : "Showing the selected match only."}</p>
+        </div>
+        <div className="panel-inner manager-table">
+          <SortableTable rows={breakdownRows} columns={columns} getRowKey={(row) => row.key} />
+        </div>
+      </section>
     </AppShell>
   );
+}
+
+function sumBy(items: MatchStatRecord[], accessor: (item: MatchStatRecord) => number): number {
+  return items.reduce((total, item) => total + accessor(item), 0);
+}
+
+function sortByDateThenMatch(left: MatchStatRecord, right: MatchStatRecord): number {
+  const leftTime = Date.parse(left.date);
+  const rightTime = Date.parse(right.date);
+  if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
+    return leftTime - rightTime;
+  }
+  return left.matchLabel.localeCompare(right.matchLabel);
+}
+
+function formatNumber(value: number): string {
+  if (!Number.isFinite(value)) return "0";
+  const rounded = Math.round(value * 100) / 100;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2).replace(/\.00$/, "").replace(/(\.\d*[1-9])0+$/, "$1");
 }

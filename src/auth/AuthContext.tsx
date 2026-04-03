@@ -26,7 +26,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         };
 
         try {
-          await refreshSnapshot(next);
+          const snapshot = await refreshSnapshot(next);
+          next.playerId = snapshot.auth.playerId ?? next.playerId;
         } catch (error) {
           if (!hasSnapshotCacheForSession(next)) {
             throw error;

@@ -17,7 +17,7 @@ export function PlayerLandingPage() {
       setError(null);
       getSnapshot(session)
         .then(setSnapshot)
-        .catch((err) => setError(err instanceof Error ? err.message : "Could not load cached players"));
+        .catch((err) => setError(err instanceof Error ? err.message : "Unable to load data. Please check your API key or connection."));
     };
     load();
     const onUpdated = () => load();
@@ -34,8 +34,8 @@ export function PlayerLandingPage() {
     return (
       <AppShell title="Player View">
         <section className="panel fetch-status-card" role="alert">
-          <h2>Player data is unavailable.</h2>
-          <p>{isRateLimit ? "Google Sheets API is rate-limited right now. Please wait a moment and retry." : "Could not load player data from local cache."}</p>
+          <h2>Unable to load data. Please check your API key or connection.</h2>
+          <p>{isRateLimit ? "Google Sheets API is rate-limited right now. Please wait a moment and retry." : "Unable to load data. Please check your API key or connection."}</p>
           <p className="fetch-status-detail">{error}</p>
           <button type="button" className="fetch-retry-btn" onClick={() => void refreshSnapshot(session)}>
             Refresh Data
@@ -56,7 +56,7 @@ export function PlayerLandingPage() {
     );
   }
 
-  const firstVisible = snapshot.visiblePlayerIds[0] || snapshot.dashboard.rows[0]?.playerId || Object.keys(snapshot.playerViews)[0];
+  const firstVisible = snapshot.visiblePlayerIds[0] || Object.keys(snapshot.players)[0];
   if (!firstVisible) {
     return (
       <AppShell title="Player View">

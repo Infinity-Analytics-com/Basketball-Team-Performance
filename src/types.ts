@@ -15,64 +15,80 @@ export interface AuthContext {
   playerId?: string;
 }
 
-export interface DashboardKpi {
-  label: string;
-  value: string;
-  subtitle: string;
-}
-
 export interface DashboardFilterOption {
   id: string;
   label: string;
   description: string;
 }
 
-export interface PlayerRow {
-  rank: number;
+export interface PlayerDirectoryEntry {
   playerId: string;
   name: string;
-  position: string;
   number: string;
-  minutes?: number;
-  att60: number;
-  trans60: number;
-  def60: number;
-  koOurPct: number;
-  koOppPct: number;
-  totalImpact: number;
+  position: string;
 }
 
-export interface TopPerformer {
-  title: string;
+export interface MatchStatRecord {
+  key: string;
+  matchId: string;
+  matchLabel: string;
+  opposition: string;
+  date: string;
   playerId: string;
   playerName: string;
-  number: string;
-  position: string;
-  value: number;
-  rounds: number[];
+  totalMinutes: number;
+  pts: number;
+  goalsScored: number;
+  tackles: number;
+  duelsContested: number;
+  duelsLost: number;
+  simplePass: number;
+  advancePass: number;
+  carries: number;
+  turnoversInContact: number;
+  turnoverSkillError: number;
+  turnoversKickedAway: number;
+  turnovers: number;
+  assistsShots: number;
+  assistsGoals: number;
+  assists: number;
+  onePointerAttempts: number;
+  onePointerScored: number;
+  twoPointerAttempts: number;
+  twoPointerScored: number;
+  goalAttempts: number;
+  attackImpact: number;
+  transitionImpact: number;
+  defenseImpact: number;
+  totalImpact: number;
+  koWinsOur: number;
+  koContestsOur: number;
+  koWinsOpp: number;
+  koContestsOpp: number;
 }
 
-export interface DashboardView {
-  kpis: DashboardKpi[];
-  tabs: string[];
-  rows: PlayerRow[];
-  topPerformers: TopPerformer[];
-}
-
-export interface PlayerView {
+export interface PerformanceLeaderboardRecord {
+  key: string;
+  matchId: string;
   playerId: string;
-  header: {
-    playerName: string;
-    subtitle: string;
-    scoresFor: number;
-    turnoversAgainst: number;
-  };
-  cards: Array<{
-    id: string;
-    title: string;
-    metric: string;
-    lines: Array<{ label: string; value: string; ratio?: number }>;
-  }>;
+  playerName: string;
+  minutes: number;
+  overallImpact: number;
+  attackImpact: number;
+  defenseImpact: number;
+  transitionImpact: number;
+}
+
+export interface ShootingLeaderboardRecord {
+  key: string;
+  matchId: string;
+  playerId: string;
+  playerName: string;
+  minutes: number;
+  playOverallEvPerShot: number;
+  freeOverallEvPerShot: number;
+  playOnePointerEv: number;
+  freeOnePointerEv: number;
 }
 
 export interface SnapshotResponse {
@@ -81,21 +97,22 @@ export interface SnapshotResponse {
     fetchedAt: string;
     version: string;
     sourceTabs?: {
-      input: string;
-      impact: string;
-      categories: string;
+      input?: string;
+      performance?: string;
+      shooting?: string;
+      impact?: string;
+      categories?: string;
     };
   };
   auth: AuthContext;
   permissions: Permission[];
   visiblePlayerIds: string[];
-  dashboard: DashboardView;
-  filters?: {
+  players: Record<string, PlayerDirectoryEntry>;
+  filters: {
     defaultOptionId: string;
     options: DashboardFilterOption[];
-    dashboards: Record<string, DashboardView>;
-    playerViews: Record<string, Record<string, PlayerView>>;
   };
-  players: Record<string, { playerId: string; name: string; number: string; position: string }>;
-  playerViews: Record<string, PlayerView>;
+  records: MatchStatRecord[];
+  performanceLeaderboard: PerformanceLeaderboardRecord[];
+  shootingLeaderboard: ShootingLeaderboardRecord[];
 }

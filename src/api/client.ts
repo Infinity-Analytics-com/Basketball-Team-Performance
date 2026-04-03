@@ -3,7 +3,7 @@ import type { SnapshotResponse } from "@/types";
 import type { Session } from "@/auth/session";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
-const SNAPSHOT_CACHE_KEY = "afl-snapshot-cache:v1";
+const SNAPSHOT_CACHE_KEY = "afl-snapshot-cache:v2";
 export const SNAPSHOT_CACHE_UPDATED_EVENT = "snapshot-cache-updated";
 
 interface SnapshotCacheEntry {
@@ -82,10 +82,10 @@ export async function refreshSnapshot(session: Session): Promise<SnapshotRespons
 export async function getSnapshot(session: Session): Promise<SnapshotResponse> {
   const entry = readCacheEntry();
   if (!entry) {
-    throw new Error("No cached snapshot found. Use Refresh Data to fetch from Google Sheets.");
+    throw new Error("Unable to load data. Please check your API key or connection.");
   }
   if (entry.session.userId !== session.userId || entry.session.role !== session.role) {
-    throw new Error("Cached snapshot belongs to a different user session. Use Refresh Data.");
+    throw new Error("Unable to load data. Please check your API key or connection.");
   }
   return entry.snapshot;
 }

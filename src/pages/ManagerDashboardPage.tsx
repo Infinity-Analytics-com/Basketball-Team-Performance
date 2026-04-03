@@ -1,28 +1,56 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { AppShell } from "@/components/Layout";
 import { LoadingCard } from "@/components/LoadingCard";
 import { SortableTable, type SortableTableColumn } from "@/components/SortableTable";
 import { useAuth } from "@/auth/AuthContext";
 import { getSnapshot, refreshSnapshot, SNAPSHOT_CACHE_UPDATED_EVENT } from "@/api/client";
-import type { SnapshotResponse } from "@/types";
-import type { ManagerTableRow } from "@/pages/managerDashboardSorting";
+import type { MatchStatRecord, SnapshotResponse } from "@/types";
+
+const DATA_ERROR_MESSAGE = "Unable to load data. Please check your API key or connection.";
+
+type ManagerTableRow = {
+  playerId: string;
+  name: string;
+  totalMinutes: number;
+  totalImpact60: number;
+  att60: number;
+  trans60: number;
+  def60: number;
+  koOurPct: number;
+  koOppPct: number;
+  totalImpact: number;
+  turnovers: number;
+  rounds: Array<{ matchId: string; totalImpact: number; attackImpact: number; transitionImpact: number; defenseImpact: number }>;
+};
+
+type SummaryCard = {
+  label: string;
+  value: string;
+  subtitle: string;
+};
+
+type LeaderCard = {
+  title: string;
+  playerId: string;
+  playerName: string;
+  value: number;
+  rounds: number[];
+};
 
 export function ManagerDashboardPage() {
   const { session } = useAuth();
   const [snapshot, setSnapshot] = useState<SnapshotResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [activeFilterId, setActiveFilterId] = useState("all");
+  const [activeMatchFilter, setActiveMatchFilter] = useState("all");
 
   useEffect(() => {
     if (!session) return;
     const load = () => {
+      setError(null);
       getSnapshot(session)
-        .then((data) => {
-          setSnapshot(data);
-          setError(null);
-        })
-        .catch((err) => setError(err instanceof Error ? err.message : "Could not load cached snapshot"));
+        .then(setSnapshot)
+        .catch((err) => setError(err instanceof Error ? err.message : DATA_ERROR_MESSAGE));
     };
     load();
     const onUpdated = () => load();
@@ -32,43 +60,18 @@ export function ManagerDashboardPage() {
 
   useEffect(() => {
     if (!snapshot) return;
-    const nextDefault = snapshot.filters?.defaultOptionId ?? "all";
-    const options = snapshot.filters?.options.map((option) => option.id) ?? ["all"];
-    setActiveFilterId((current) => (options.includes(current) ? current : nextDefault));
+    const options = snapshot.filters.options.map((option) => option.id);
+    setActiveMatchFilter((current) => (options.includes(current) ? current : "all"));
   }, [snapshot]);
 
-  const activeDashboard = snapshot?.filters?.dashboards[activeFilterId] ?? snapshot?.dashboard ?? null;
-  const filterOptions = snapshot?.filters?.options ?? [{ id: "all", label: "All Matches", description: "Combined view across all available matches" }];
+  const visibleRecords = useMemo(
+    () => (activeMatchFilter === "all" ? snapshot?.records ?? [] : (snapshot?.records ?? []).filter((record) => record.matchId === activeMatchFilter)),
+    [snapshot, activeMatchFilter]
+  );
 
-  const rows = useMemo<ManagerTableRow[]>(() => {
-    if (!activeDashboard) return [];
-    return activeDashboard.rows.map((row) => {
-      const totalMinutes = toNumericValue(row.minutes);
-      const totalImpact = toNumericValue(row.totalImpact);
-      const totalImpact60 = totalMinutes > 0 ? (totalImpact / totalMinutes) * 60 : 0;
-
-      return {
-        ...row,
-        totalMinutes,
-        totalImpact60
-      };
-    });
-  }, [activeDashboard]);
-
-  const orderedTopPerformers = useMemo(() => {
-    if (!activeDashboard) return [];
-    const orderForTitle = (title: string) => {
-      const normalized = title.toLowerCase();
-      if (normalized.includes("total") && normalized.includes("impact")) return 0;
-      if (normalized.includes("attack")) return 1;
-      if (normalized.includes("transition")) return 2;
-      if (normalized.includes("defence") || normalized.includes("defense")) return 3;
-      return 99;
-    };
-    return activeDashboard.topPerformers
-      .slice()
-      .sort((a, b) => orderForTitle(a.title) - orderForTitle(b.title) || a.title.localeCompare(b.title));
-  }, [activeDashboard]);
+  const tableRows = useMemo(() => aggregateRows(visibleRecords), [visibleRecords]);
+  const summaryCards = useMemo<SummaryCard[]>(() => buildSummaryCards(tableRows), [tableRows]);
+  const topPerformers = useMemo<LeaderCard[]>(() => buildLeaderCards(tableRows), [tableRows]);
 
   if (!session) return null;
 
@@ -146,57 +149,62 @@ export function ManagerDashboardPage() {
       {!snapshot && !error && <LoadingCard label="Loading snapshot" />}
       {error && (
         <section className="panel fetch-status-card" role="alert">
-          <h2>Cached data is unavailable.</h2>
-          <p>{error}</p>
-          <button type="button" className="fetch-retry-btn" onClick={() => session && void refreshSnapshot(session)}>
+          <h2>Unable to load data. Please check your API key or connection.</h2>
+          <p className="fetch-status-detail">{error}</p>
+          <button type="button" className="fetch-retry-btn" onClick={() => void refreshSnapshot(session)}>
             Refresh Data
           </button>
         </section>
       )}
-      {snapshot && activeDashboard && (
+      {snapshot && !error && (
         <div className="dashboard-wrap panel">
           <section className="dashboard-toolbar">
             <div>
-              <p className="toolbar-kicker">Performance Filter</p>
-              <h2 className="toolbar-title">Update the full dashboard by recent match window</h2>
+              <p className="toolbar-kicker">Match Filter</p>
+              <h2 className="toolbar-title">Select a played match to update the full dashboard</h2>
             </div>
-            <div className="filter-chip-group" role="tablist" aria-label="Manager dashboard filter">
-              {filterOptions.map((option) => (
-                <button
-                  key={option.id}
-                  type="button"
-                  className={`filter-chip ${activeFilterId === option.id ? "active" : ""}`}
-                  onClick={() => setActiveFilterId(option.id)}
-                  title={option.description}
+            <div className="filter-toolbar-row">
+              <label className="filter-select-inline">
+                <span className="filter-select-label">Match</span>
+                <select
+                  className="filter-select"
+                  aria-label="Manager dashboard match filter"
+                  value={activeMatchFilter}
+                  onChange={(event) => setActiveMatchFilter(event.target.value)}
                 >
-                  {option.label}
-                </button>
-              ))}
+                  {snapshot.filters.options.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
           </section>
+
           <section className="kpi-grid">
-            {activeDashboard.kpis.map((kpi) => (
-              <article key={kpi.label} className="kpi-card panel-inner">
-                <h3>{kpi.label}</h3>
-                <p className="kpi-value">{kpi.value}</p>
-                <span>{kpi.subtitle}</span>
+            {summaryCards.map((card) => (
+              <article key={card.label} className="kpi-card panel-inner">
+                <h3>{card.label}</h3>
+                <p className="kpi-value">{card.value}</p>
+                <span>{card.subtitle}</span>
               </article>
             ))}
           </section>
 
           <section className="table panel-inner manager-table">
-            <SortableTable rows={rows} columns={columns} getRowKey={(row) => row.playerId} />
+            <SortableTable rows={tableRows} columns={columns} getRowKey={(row) => row.playerId} />
           </section>
 
           <section className="performers-grid">
-            {orderedTopPerformers.map((top) => (
+            {topPerformers.map((top) => (
               <article className="performer panel-inner" key={top.title}>
                 <h4>{top.title}</h4>
                 <p>{top.playerName}</p>
                 <strong>{top.value.toFixed(1)}</strong>
                 <div className="round-strip">
-                  {top.rounds.map((v, i) => (
-                    <span key={`${top.title}-${i}`}>R{i + 1} {v}</span>
+                  {top.rounds.map((value, index) => (
+                    <span key={`${top.title}-${index}`}>R{index + 1} {value.toFixed(1)}</span>
                   ))}
                 </div>
               </article>
@@ -208,12 +216,116 @@ export function ManagerDashboardPage() {
   );
 }
 
-function toNumericValue(value: unknown): number {
-  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
-  if (typeof value === "string") {
-    const normalized = value.replace(/,/g, "").replace(/%/g, "").trim();
-    const parsed = Number(normalized);
-    return Number.isFinite(parsed) ? parsed : 0;
+function aggregateRows(records: MatchStatRecord[]): ManagerTableRow[] {
+  const byPlayer = new Map<string, ManagerTableRow>();
+
+  for (const record of records) {
+    const current = byPlayer.get(record.playerId) ?? {
+      playerId: record.playerId,
+      name: record.playerName,
+      totalMinutes: 0,
+      totalImpact60: 0,
+      att60: 0,
+      trans60: 0,
+      def60: 0,
+      koOurPct: 0,
+      koOppPct: 0,
+      totalImpact: 0,
+      turnovers: 0,
+      rounds: []
+    };
+
+    current.totalMinutes += record.totalMinutes;
+    current.totalImpact += record.totalImpact;
+    current.turnovers += record.turnovers;
+    current.att60 += record.attackImpact;
+    current.trans60 += record.transitionImpact;
+    current.def60 += record.defenseImpact;
+    current.koOurPct += record.koWinsOur;
+    current.koOppPct += record.koWinsOpp;
+    current.rounds.push({
+      matchId: record.matchId,
+      totalImpact: record.totalImpact,
+      attackImpact: record.attackImpact,
+      transitionImpact: record.transitionImpact,
+      defenseImpact: record.defenseImpact
+    });
+
+    (current as ManagerTableRow & { koOurContests?: number; koOppContests?: number }).koOurContests = ((current as ManagerTableRow & { koOurContests?: number }).koOurContests ?? 0) + record.koContestsOur;
+    (current as ManagerTableRow & { koOurContests?: number; koOppContests?: number }).koOppContests = ((current as ManagerTableRow & { koOppContests?: number }).koOppContests ?? 0) + record.koContestsOpp;
+
+    byPlayer.set(record.playerId, current);
   }
-  return 0;
+
+  return Array.from(byPlayer.values())
+    .map((row) => {
+      const koOurContests = (row as ManagerTableRow & { koOurContests?: number }).koOurContests ?? 0;
+      const koOppContests = (row as ManagerTableRow & { koOppContests?: number }).koOppContests ?? 0;
+      return {
+        ...row,
+        totalImpact60: row.totalMinutes > 0 ? (row.totalImpact / row.totalMinutes) * 60 : 0,
+        att60: row.totalMinutes > 0 ? (row.att60 / row.totalMinutes) * 60 : 0,
+        trans60: row.totalMinutes > 0 ? (row.trans60 / row.totalMinutes) * 60 : 0,
+        def60: row.totalMinutes > 0 ? (row.def60 / row.totalMinutes) * 60 : 0,
+        koOurPct: koOurContests > 0 ? (row.koOurPct / koOurContests) * 100 : 0,
+        koOppPct: koOppContests > 0 ? (row.koOppPct / koOppContests) * 100 : 0
+      };
+    })
+    .sort((left, right) => right.totalImpact - left.totalImpact || left.name.localeCompare(right.name));
+}
+
+function buildSummaryCards(rows: ManagerTableRow[]): SummaryCard[] {
+  const count = rows.length || 1;
+  return [
+    {
+      label: "All Impact",
+      value: (rows.reduce((sum, row) => sum + row.totalImpact, 0) / count).toFixed(2),
+      subtitle: "Average Total Impact"
+    },
+    {
+      label: "TO Per Game",
+      value: (rows.reduce((sum, row) => sum + averageTurnoversFromRounds(row), 0) / count).toFixed(1),
+      subtitle: "Average turnovers across selected games"
+    },
+    {
+      label: "KO % OUR",
+      value: `${(rows.reduce((sum, row) => sum + row.koOurPct, 0) / count).toFixed(0)}%`,
+      subtitle: "Our kickout win %"
+    },
+    {
+      label: "KO % OPP",
+      value: `${(rows.reduce((sum, row) => sum + row.koOppPct, 0) / count).toFixed(0)}%`,
+      subtitle: "Opp kickout win %"
+    }
+  ];
+}
+
+function buildLeaderCards(rows: ManagerTableRow[]): LeaderCard[] {
+  return [
+    buildLeaderCard(rows, "Top Total Impact", (row) => row.totalImpact, (round) => round.totalImpact),
+    buildLeaderCard(rows, "Top Attack Impact", (row) => row.att60, (round) => round.attackImpact),
+    buildLeaderCard(rows, "Top Transition Impact", (row) => row.trans60, (round) => round.transitionImpact),
+    buildLeaderCard(rows, "Top Defence Impact", (row) => row.def60, (round) => round.defenseImpact)
+  ];
+}
+
+function buildLeaderCard(
+  rows: ManagerTableRow[],
+  title: string,
+  accessor: (row: ManagerTableRow) => number,
+  roundAccessor: (round: ManagerTableRow["rounds"][number]) => number
+): LeaderCard {
+  const winner = rows.slice().sort((left, right) => accessor(right) - accessor(left) || left.name.localeCompare(right.name))[0];
+  return {
+    title,
+    playerId: winner?.playerId ?? "",
+    playerName: winner?.name ?? "-",
+    value: winner ? accessor(winner) : 0,
+    rounds: winner ? winner.rounds.slice(0, 4).map((round) => roundAccessor(round)) : []
+  };
+}
+
+function averageTurnoversFromRounds(row: ManagerTableRow): number {
+  if (!row.rounds.length) return 0;
+  return row.turnovers / row.rounds.length;
 }
