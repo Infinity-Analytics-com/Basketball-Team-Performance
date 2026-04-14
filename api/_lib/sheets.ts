@@ -1,7 +1,13 @@
-ï»¿import { getSettings } from "./store";
+import { getSettings } from "./store";
 import type { ApiUser } from "./types";
 import { permissionsForRole } from "../../src/rbac/permissions";
-import type { DashboardFilterOption, MatchStatRecord, SnapshotResponse } from "../../src/types";
+import type {
+  DashboardFilterOption,
+  MatchStatRecord,
+  PerformanceLeaderboardRecord,
+  ShootingLeaderboardRecord,
+  SnapshotResponse
+} from "../../src/types";
 
 const sheetTabs = {
   input: ["Input Sheet AFL"],
@@ -11,7 +17,6 @@ const sheetTabs = {
 
 type Grid = string[][];
 type ParsedRow = Record<string, string>;
-
 type SnapshotPayload = SnapshotResponse;
 
 async function fetchTabValues(sheetId: string, tab: string, apiKey: string): Promise<Grid> {
@@ -135,12 +140,22 @@ function parseDateValue(value: string): number | null {
 }
 
 function formatMatchLabel(matchId: string, opposition: string): string {
-  return opposition ? `${matchId} â€” vs ${opposition}` : matchId;
+  return opposition ? `${matchId} — vs ${opposition}` : matchId;
 }
 
 function parseLeaderboardMatchId(row: ParsedRow): string {
   const matchId = normalizeMatchId(pick(row, ["MatchID", "Match Id", "Match", "Game", "Round", "Fixture"]));
   return isInvalidMatchId(matchId) ? "" : matchId;
+}
+
+function getFreeShotCounts(row: ParsedRow) {
+  const freeOnePointerAttempts = toNumber(pick(row, ["One_Pointer_Attempts_F", "Free One_Pointer_Attempts", "Free One Pointer Attempts"]));
+  const freeOnePointerScored = toNumber(pick(row, ["One_Pointer_Scored_F", "Free One_Pointer_Scored", "Free One Pointer Scored"]));
+  const freeTwoPointerAttempts = toNumber(pick(row, ["Two_Pointer_Attempts_F", "Free Two_Pointer_Attempts", "Free Two Pointer Attempts"]));
+  const freeTwoPointerScored = toNumber(pick(row, ["Two_Pointer_Scored_F", "Free Two_Pointer_Scored", "Free Two Pointer Scored"]));
+  const freeGoalAttempts = toNumber(pick(row, ["Goal_Attempts_F", "Free Goal_Attempts", "Free Goal Attempts"]));
+  const freeGoalsScored = toNumber(pick(row, ["Goals_Scored_F", "Free Goals_Scored", "Free Goals Scored"]));
+  return { freeOnePointerAttempts, freeOnePointerScored, freeTwoPointerAttempts, freeTwoPointerScored, freeGoalAttempts, freeGoalsScored };
 }
 
 function parseInputRecords(inputRows: ParsedRow[]): MatchStatRecord[] {
@@ -153,6 +168,7 @@ function parseInputRecords(inputRows: ParsedRow[]): MatchStatRecord[] {
       const opposition = pick(row, ["Opposition", "Opponent", "Opp"]);
       const assistsShots = toNumber(pick(row, ["Assists_Shots", "Assists Shots"]));
       const assistsGoals = toNumber(pick(row, ["Assists_Goals", "Assists Goals"]));
+      const forceTurnoverWin = toNumber(pick(row, ["Force Turnover Win", "Force_Turnover_Win"]));
       const turnoversInContact = toNumber(pick(row, ["Turnovers in Contact", "Turnovers \n in Contact", "Turnovers\nin Contact", "Turnovers inContact"]));
       const turnoverSkillError = toNumber(pick(row, ["Turnover Skill Error", "Turnover_Skill_Error"]));
       const turnoversKickedAway = toNumber(pick(row, ["Turnovers Kicked Away", "Turnovers \n Kicked Away", "Turnovers\nKicked Away"]));
@@ -168,6 +184,7 @@ function parseInputRecords(inputRows: ParsedRow[]): MatchStatRecord[] {
       const koWinsOpp = koOppP1 + koOppP2 + koOppP3 + koOppBreak;
       const koContestsOur = toNumber(pick(row, ["Ko_Contest_Us", "KO Contest Us"])) || koWinsOur;
       const koContestsOpp = toNumber(pick(row, ["KO_Contest_Opp", "KO Contest Opp"])) || koWinsOpp;
+      const free = getFreeShotCounts(row);
 
       return {
         key: `${matchDedupKey(matchId)}|${playerName}|${index}`,
@@ -181,7 +198,7 @@ function parseInputRecords(inputRows: ParsedRow[]): MatchStatRecord[] {
         pts: toNumber(pick(row, ["Pts", "Points"])),
         goalsScored: toNumber(pick(row, ["Goals_Scored", "Goals Scored"])),
         tackles: toNumber(pick(row, ["Tackles", "Tackles (no TO)", "Tackles no TO"])),
-        duelsContested: toNumber(pick(row, ["Duels Contested", "Duels â€“ Contested", "Duels - Contested"])),
+        duelsContested: toNumber(pick(row, ["Duels Contested", "Duels – Contested", "Duels - Contested"])),
         duelsLost: toNumber(pick(row, ["Duels Lost", "Duels_Lost"])),
         simplePass: toNumber(pick(row, ["Simple Pass", "Simple_Pass"])),
         advancePass: toNumber(pick(row, ["Advance Pass", "Advance_Pass"])),
@@ -189,6 +206,7 @@ function parseInputRecords(inputRows: ParsedRow[]): MatchStatRecord[] {
         turnoversInContact,
         turnoverSkillError,
         turnoversKickedAway,
+        forceTurnoverWin,
         turnovers: turnoversInContact + turnoverSkillError + turnoversKickedAway,
         assistsShots,
         assistsGoals,
@@ -198,6 +216,12 @@ function parseInputRecords(inputRows: ParsedRow[]): MatchStatRecord[] {
         twoPointerAttempts: toNumber(pick(row, ["Two_Pointer_Attempts", "Two Pointer Attempts"])),
         twoPointerScored: toNumber(pick(row, ["Two_Pointer_Scored", "Two Pointer Scored"])),
         goalAttempts: toNumber(pick(row, ["Goal_Attempts", "Goal Attempts"])),
+        freeOnePointerAttempts: free.freeOnePointerAttempts,
+        freeOnePointerScored: free.freeOnePointerScored,
+        freeTwoPointerAttempts: free.freeTwoPointerAttempts,
+        freeTwoPointerScored: free.freeTwoPointerScored,
+        freeGoalAttempts: free.freeGoalAttempts,
+        freeGoalsScored: free.freeGoalsScored,
         attackImpact: 0,
         transitionImpact: 0,
         defenseImpact: 0,
@@ -289,7 +313,7 @@ function buildMatchOptions(records: MatchStatRecord[]): DashboardFilterOption[] 
   ];
 }
 
-function parsePerformanceLeaderboardRows(rows: ParsedRow[]) {
+function parsePerformanceLeaderboardRows(rows: ParsedRow[]): PerformanceLeaderboardRecord[] {
   return rows
     .map((row, index) => {
       const playerName = pick(row, ["PlayerName", "Player", "Name"]);
@@ -307,10 +331,10 @@ function parsePerformanceLeaderboardRows(rows: ParsedRow[]) {
         transitionImpact: toNumber(pick(row, ["Transition Impact", "Top Transition Impact", "Transition"]))
       };
     })
-    .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+    .filter((entry): entry is PerformanceLeaderboardRecord => Boolean(entry));
 }
 
-function parseShootingLeaderboardRows(rows: ParsedRow[]) {
+function parseShootingLeaderboardRows(rows: ParsedRow[]): ShootingLeaderboardRecord[] {
   return rows
     .map((row, index) => {
       const playerName = pick(row, ["PlayerName", "Player", "Name"]);
@@ -328,10 +352,10 @@ function parseShootingLeaderboardRows(rows: ParsedRow[]) {
         freeOnePointerEv: toNumber(pick(row, ["Free 1-Pointer EV", "Top Free 1-Pointer EV", "Free 1 Pointer EV"]))
       };
     })
-    .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+    .filter((entry): entry is ShootingLeaderboardRecord => Boolean(entry));
 }
 
-function buildFallbackShooting(inputRows: ParsedRow[], records: MatchStatRecord[]) {
+function buildFallbackShooting(inputRows: ParsedRow[], records: MatchStatRecord[]): ShootingLeaderboardRecord[] {
   const freeByKey = new Map<string, ReturnType<typeof getFreeShotCounts>>();
   inputRows.forEach((row) => {
     const playerName = pick(row, ["PlayerName", "Player", "Name"]);
@@ -365,16 +389,6 @@ function buildFallbackShooting(inputRows: ParsedRow[], records: MatchStatRecord[
       freeOnePointerEv: safeDivide(free.freeOnePointerScored, free.freeOnePointerAttempts)
     };
   });
-}
-
-function getFreeShotCounts(row: ParsedRow) {
-  const freeOnePointerAttempts = toNumber(pick(row, ["One_Pointer_Attempts_F", "Free One_Pointer_Attempts", "Free One Pointer Attempts"]));
-  const freeOnePointerScored = toNumber(pick(row, ["One_Pointer_Scored_F", "Free One_Pointer_Scored", "Free One Pointer Scored"]));
-  const freeTwoPointerAttempts = toNumber(pick(row, ["Two_Pointer_Attempts_F", "Free Two_Pointer_Attempts", "Free Two Pointer Attempts"]));
-  const freeTwoPointerScored = toNumber(pick(row, ["Two_Pointer_Scored_F", "Free Two_Pointer_Scored", "Free Two Pointer Scored"]));
-  const freeGoalAttempts = toNumber(pick(row, ["Goal_Attempts_F", "Free Goal_Attempts", "Free Goal Attempts"]));
-  const freeGoalsScored = toNumber(pick(row, ["Goals_Scored_F", "Free Goals_Scored", "Free Goals Scored"]));
-  return { freeOnePointerAttempts, freeOnePointerScored, freeTwoPointerAttempts, freeTwoPointerScored, freeGoalAttempts, freeGoalsScored };
 }
 
 export async function buildSnapshot(user: ApiUser): Promise<SnapshotPayload> {

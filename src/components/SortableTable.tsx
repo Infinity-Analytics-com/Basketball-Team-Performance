@@ -54,7 +54,7 @@ export function SortableTable<T>({ rows, columns, getRowKey }: SortableTableProp
 
   const sortIndicator = (columnId: string) => {
     if (!sortState || sortState.columnId !== columnId) return "";
-    return sortState.direction === "asc" ? " ▲" : " ▼";
+    return sortState.direction === "asc" ? " ?" : " ?";
   };
 
   return (
@@ -105,4 +105,3 @@ function toSortableNumber(value: unknown): number | null {
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : null;
 }
-

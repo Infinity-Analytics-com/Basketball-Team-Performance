@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { AppShell } from "@/components/Layout";
 import { LoadingCard } from "@/components/LoadingCard";
@@ -14,15 +14,34 @@ type BreakdownRow = {
   key: string;
   matchLabel: string;
   date: string;
+  totalImpact: number;
+  attackImpact: number;
+  transitionImpact: number;
+  defenseImpact: number;
   minutes: number;
   points: number;
   goals: number;
+  onePointers: number;
+  twoPointers: number;
+  frees: number;
   tackles: number;
   simplePass: number;
   advancePass: number;
   carries: number;
   turnovers: number;
   assists: number;
+};
+
+type MetricLine = {
+  label: string;
+  value: number;
+  accent?: "gold" | "blue";
+};
+
+type SummaryCard = {
+  label: string;
+  value: number;
+  subtitle: string;
 };
 
 export function PlayerProfilePage() {
@@ -97,24 +116,51 @@ export function PlayerProfilePage() {
   }
 
   const totals = {
+    appearances: filteredRecords.length,
     minutes: sumBy(filteredRecords, (record) => record.totalMinutes),
     points: sumBy(filteredRecords, (record) => record.pts),
     goals: sumBy(filteredRecords, (record) => record.goalsScored),
+    onePointers: sumBy(filteredRecords, (record) => record.onePointerScored),
+    twoPointers: sumBy(filteredRecords, (record) => record.twoPointerScored),
+    frees: sumBy(filteredRecords, (record) => record.freeOnePointerScored + record.freeTwoPointerScored + record.freeGoalsScored),
     tackles: sumBy(filteredRecords, (record) => record.tackles),
+    duelsContested: sumBy(filteredRecords, (record) => record.duelsContested),
+    duelsLost: sumBy(filteredRecords, (record) => record.duelsLost),
     simplePass: sumBy(filteredRecords, (record) => record.simplePass),
     advancePass: sumBy(filteredRecords, (record) => record.advancePass),
     carries: sumBy(filteredRecords, (record) => record.carries),
     turnovers: sumBy(filteredRecords, (record) => record.turnovers),
-    assists: sumBy(filteredRecords, (record) => record.assists)
+    turnoversInContact: sumBy(filteredRecords, (record) => record.turnoversInContact),
+    turnoverSkillError: sumBy(filteredRecords, (record) => record.turnoverSkillError),
+    turnoversKickedAway: sumBy(filteredRecords, (record) => record.turnoversKickedAway),
+    forceTurnoverWin: sumBy(filteredRecords, (record) => record.forceTurnoverWin),
+    assists: sumBy(filteredRecords, (record) => record.assists),
+    assistsShots: sumBy(filteredRecords, (record) => record.assistsShots),
+    assistsGoals: sumBy(filteredRecords, (record) => record.assistsGoals),
+    attackImpact: sumBy(filteredRecords, (record) => record.attackImpact),
+    transitionImpact: sumBy(filteredRecords, (record) => record.transitionImpact),
+    defenseImpact: sumBy(filteredRecords, (record) => record.defenseImpact),
+    totalImpact: sumBy(filteredRecords, (record) => record.totalImpact),
+    koWinsOur: sumBy(filteredRecords, (record) => record.koWinsOur),
+    koContestsOur: sumBy(filteredRecords, (record) => record.koContestsOur),
+    koWinsOpp: sumBy(filteredRecords, (record) => record.koWinsOpp),
+    koContestsOpp: sumBy(filteredRecords, (record) => record.koContestsOpp)
   };
 
   const breakdownRows: BreakdownRow[] = filteredRecords.map((record) => ({
     key: record.key,
     matchLabel: record.matchLabel,
     date: record.date,
+    totalImpact: record.totalImpact,
+    attackImpact: record.attackImpact,
+    transitionImpact: record.transitionImpact,
+    defenseImpact: record.defenseImpact,
     minutes: record.totalMinutes,
     points: record.pts,
     goals: record.goalsScored,
+    onePointers: record.onePointerScored,
+    twoPointers: record.twoPointerScored,
+    frees: record.freeOnePointerScored + record.freeTwoPointerScored + record.freeGoalsScored,
     tackles: record.tackles,
     simplePass: record.simplePass,
     advancePass: record.advancePass,
@@ -123,17 +169,62 @@ export function PlayerProfilePage() {
     assists: record.assists
   }));
 
-  const summaryCards = [
-    { label: "Minutes Played", value: totals.minutes },
+  const summaryCards: SummaryCard[] = [
+    { label: "Appearances", value: totals.appearances, subtitle: "Matches played in the selected view" },
+    { label: "Total Minutes", value: totals.minutes, subtitle: "Minutes accumulated across the filter" },
+    { label: "Total Scores", value: totals.onePointers + totals.twoPointers + totals.goals, subtitle: "1PT + 2PT + goals combined" },
+    { label: "Frees Scored", value: totals.frees, subtitle: "Set-piece conversion in the selected view" },
+    { label: "Turnovers", value: totals.turnovers, subtitle: "Total ball losses recorded" }
+  ];
+
+  const attackMetrics: MetricLine[] = [
+    { label: "Total Impact", value: totals.totalImpact },
+    { label: "Attack Impact", value: totals.attackImpact },
     { label: "Points", value: totals.points },
     { label: "Goals", value: totals.goals },
-    { label: "Tackles", value: totals.tackles },
+    { label: "1-Pointers", value: totals.onePointers },
+    { label: "2-Pointers", value: totals.twoPointers },
+    { label: "Frees Scored", value: totals.frees },
+    { label: "Assists", value: totals.assists }
+  ];
+
+  const transitionMetrics: MetricLine[] = [
+    { label: "Transition Impact", value: totals.transitionImpact, accent: "blue" },
     { label: "Simple Pass", value: totals.simplePass },
     { label: "Advance Pass", value: totals.advancePass },
     { label: "Carries", value: totals.carries },
-    { label: "Turnovers", value: totals.turnovers },
-    { label: "Assists", value: totals.assists }
+    { label: "Assist Shots", value: totals.assistsShots },
+    { label: "Assist Goals", value: totals.assistsGoals }
   ];
+
+  const defenceMetrics: MetricLine[] = [
+    { label: "Defence Impact", value: totals.defenseImpact, accent: "blue" },
+    { label: "Tackles", value: totals.tackles },
+    { label: "Duels Contested", value: totals.duelsContested },
+    { label: "Duels Lost", value: totals.duelsLost },
+    { label: "Force TO Win", value: totals.forceTurnoverWin }
+  ];
+
+  const kickoutMetrics: MetricLine[] = [
+    { label: "KO % OUR", value: safeDivide(totals.koWinsOur, totals.koContestsOur) * 100 },
+    { label: "OUR Contests", value: totals.koContestsOur },
+    { label: "OUR Wins", value: totals.koWinsOur },
+    { label: "KO % OPP", value: safeDivide(totals.koWinsOpp, totals.koContestsOpp) * 100, accent: "blue" },
+    { label: "OPP Contests", value: totals.koContestsOpp },
+    { label: "OPP Wins", value: totals.koWinsOpp }
+  ];
+
+  const turnoverMetrics: MetricLine[] = [
+    { label: "Total Turnovers", value: totals.turnovers },
+    { label: "In Contact", value: totals.turnoversInContact },
+    { label: "Skill Error", value: totals.turnoverSkillError },
+    { label: "Kicked Away", value: totals.turnoversKickedAway }
+  ];
+
+  const attackMax = Math.max(...attackMetrics.map((item) => item.value), 1);
+  const transitionMax = Math.max(...transitionMetrics.map((item) => item.value), 1);
+  const defenceMax = Math.max(...defenceMetrics.map((item) => item.value), 1);
+  const turnoverMax = Math.max(...turnoverMetrics.map((item) => item.value), 1);
 
   const showBackButton = session.role === "manager" || session.role === "admin";
   const handleBack = () => {
@@ -161,15 +252,53 @@ export function PlayerProfilePage() {
       label: "Match",
       sortAccessor: (row) => `${row.date}|${row.matchLabel}`,
       cell: (row) => (
-        <div className="match-cell">
-          <span>{row.matchLabel}</span>
-          <small>{row.date || "-"}</small>
+        <div className="manager-player-cell player-history-match-cell">
+          <span className="manager-player-avatar player-match-avatar">{getMatchBadge(row.matchLabel)}</span>
+          <span className="manager-player-meta">
+            <span className="manager-player-link">{row.matchLabel}</span>
+            <small>{row.date || "-"}</small>
+          </span>
         </div>
       )
+    },
+    {
+      id: "totalImpact",
+      label: "Total Impact",
+      sortAccessor: (row) => row.totalImpact,
+      cell: (row) => <HistoryMetricCell value={row.totalImpact} bars={buildMiniBarValues([row.attackImpact, row.transitionImpact, row.defenseImpact, row.totalImpact])} />,
+      headerClassName: "num",
+      cellClassName: "num"
+    },
+    {
+      id: "attackImpact",
+      label: "Attack",
+      sortAccessor: (row) => row.attackImpact,
+      cell: (row) => <HistoryMetricCell value={row.attackImpact} bars={buildMiniBarValues([row.points, row.goals, row.onePointers, row.twoPointers])} />,
+      headerClassName: "num",
+      cellClassName: "num"
+    },
+    {
+      id: "transitionImpact",
+      label: "Transition",
+      sortAccessor: (row) => row.transitionImpact,
+      cell: (row) => <HistoryMetricCell value={row.transitionImpact} bars={buildMiniBarValues([row.simplePass, row.advancePass, row.carries, row.assists])} />,
+      headerClassName: "num",
+      cellClassName: "num"
+    },
+    {
+      id: "defenseImpact",
+      label: "Defence",
+      sortAccessor: (row) => row.defenseImpact,
+      cell: (row) => <HistoryMetricCell value={row.defenseImpact} bars={buildMiniBarValues([row.tackles, row.turnovers, row.minutes])} accent="blue" />,
+      headerClassName: "num",
+      cellClassName: "num"
     },
     { id: "minutes", label: "Minutes", sortAccessor: (row) => row.minutes, cell: (row) => formatNumber(row.minutes), headerClassName: "num", cellClassName: "num" },
     { id: "points", label: "Points", sortAccessor: (row) => row.points, cell: (row) => formatNumber(row.points), headerClassName: "num", cellClassName: "num" },
     { id: "goals", label: "Goals", sortAccessor: (row) => row.goals, cell: (row) => formatNumber(row.goals), headerClassName: "num", cellClassName: "num" },
+    { id: "onePointers", label: "1PT", sortAccessor: (row) => row.onePointers, cell: (row) => formatNumber(row.onePointers), headerClassName: "num", cellClassName: "num" },
+    { id: "twoPointers", label: "2PT", sortAccessor: (row) => row.twoPointers, cell: (row) => formatNumber(row.twoPointers), headerClassName: "num", cellClassName: "num" },
+    { id: "frees", label: "Frees", sortAccessor: (row) => row.frees, cell: (row) => formatNumber(row.frees), headerClassName: "num", cellClassName: "num" },
     { id: "tackles", label: "Tackles", sortAccessor: (row) => row.tackles, cell: (row) => formatNumber(row.tackles), headerClassName: "num", cellClassName: "num" },
     { id: "simplePass", label: "Simple Pass", sortAccessor: (row) => row.simplePass, cell: (row) => formatNumber(row.simplePass), headerClassName: "num", cellClassName: "num" },
     { id: "advancePass", label: "Advance Pass", sortAccessor: (row) => row.advancePass, cell: (row) => formatNumber(row.advancePass), headerClassName: "num", cellClassName: "num" },
@@ -180,48 +309,175 @@ export function PlayerProfilePage() {
 
   return (
     <AppShell title={player.name} titlePrefix={backIcon}>
-      <section className="player-dashboard-hero panel">
-        <div className="player-dashboard-copy">
-          <p className="player-page-subtitle">Player Detail Dashboard</p>
-          <h2 className="player-dashboard-name">{player.name}</h2>
-          <p className="player-page-meta">Match-by-match live Google Sheets data</p>
-        </div>
-        <label className="filter-select-field player-filter-field">
-          <span className="filter-select-label">Match</span>
-          <select className="filter-select" aria-label="Player dashboard match filter" value={activeFilterId} onChange={(event) => setActiveFilterId(event.target.value)}>
-            {snapshot.filters.options.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-      </section>
+      <div className="player-dashboard-shell panel">
+        <section className="player-dashboard-hero panel">
+          <div className="player-dashboard-copy">
+            <div className="player-header-identity">
+              <span className="manager-player-avatar player-hero-avatar">{getInitials(player.name)}</span>
+              <div>
+                <p className="player-page-subtitle">Player Detail Dashboard</p>
+                <h2 className="player-dashboard-name">{player.name}</h2>
+              </div>
+            </div>
+            <p className="player-page-meta">Manager-ready player view powered by live Google Sheets data</p>
+          </div>
+          <label className="filter-select-field player-filter-field">
+            <span className="filter-select-label">Match</span>
+            <select className="filter-select" aria-label="Player dashboard match filter" value={activeFilterId} onChange={(event) => setActiveFilterId(event.target.value)}>
+              {snapshot.filters.options.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </section>
 
-      <div className="player-stat-grid">
-        {summaryCards.map((card) => (
-          <article key={card.label} className="player-summary-card panel-inner">
-            <span>{card.label}</span>
-            <strong>{formatNumber(card.value)}</strong>
+        <section className="kpi-grid player-kpi-grid">
+          {summaryCards.map((card, index) => (
+            <article key={card.label} className={`kpi-card panel-inner player-overview-card player-overview-card-${index + 1}`}>
+              <h3>{card.label}</h3>
+              <p className="kpi-value">{formatNumber(card.value)}</p>
+              <span>{card.subtitle}</span>
+            </article>
+          ))}
+        </section>
+
+        <section className="player-screen-grid">
+          <article className="panel player-card player-card-featured">
+            <div className="player-card-head">
+              <div>
+                <p className="player-card-kicker">Attack</p>
+                <h2>Output and scoring</h2>
+              </div>
+              <strong>{formatNumber(totals.attackImpact)}</strong>
+            </div>
+            <div className="metric-lines">
+              {attackMetrics.map((metric) => (
+                <MetricLineCard key={metric.label} metric={metric} maxValue={attackMax} />
+              ))}
+            </div>
           </article>
+
+          <article className="panel player-card">
+            <div className="player-card-head">
+              <div>
+                <p className="player-card-kicker">Transition</p>
+                <h2>Link play</h2>
+              </div>
+              <strong>{formatNumber(totals.transitionImpact)}</strong>
+            </div>
+            <div className="metric-lines">
+              {transitionMetrics.map((metric) => (
+                <MetricLineCard key={metric.label} metric={metric} maxValue={transitionMax} />
+              ))}
+            </div>
+          </article>
+
+          <article className="panel player-card">
+            <div className="player-card-head">
+              <div>
+                <p className="player-card-kicker">Defence</p>
+                <h2>Without the ball</h2>
+              </div>
+              <strong>{formatNumber(totals.defenseImpact)}</strong>
+            </div>
+            <div className="metric-lines">
+              {defenceMetrics.map((metric) => (
+                <MetricLineCard key={metric.label} metric={metric} maxValue={defenceMax} />
+              ))}
+            </div>
+          </article>
+
+          <article className="panel player-card">
+            <div className="player-card-head">
+              <div>
+                <p className="player-card-kicker">Kick Outs</p>
+                <h2>Contest contribution</h2>
+              </div>
+              <strong>{formatPercent(safeDivide(totals.koWinsOur, totals.koContestsOur) * 100)}</strong>
+            </div>
+            <div className="metric-lines">
+              {kickoutMetrics.map((metric) => (
+                <MetricLineCard key={metric.label} metric={metric} maxValue={100} formatValue={metric.label.includes("%") ? formatPercent : formatNumber} />
+              ))}
+            </div>
+          </article>
+
+          <article className="panel player-card">
+            <div className="player-card-head">
+              <div>
+                <p className="player-card-kicker">Turnovers</p>
+                <h2>Ball security</h2>
+              </div>
+              <strong>{formatNumber(totals.turnovers)}</strong>
+            </div>
+            <div className="metric-lines">
+              {turnoverMetrics.map((metric) => (
+                <MetricLineCard key={metric.label} metric={metric} maxValue={turnoverMax} />
+              ))}
+            </div>
+          </article>
+        </section>
+
+        <section className="panel player-breakdown-section">
+          <div className="panel-inner player-breakdown-head">
+            <h3>Match history</h3>
+            <p>{activeFilterId === "all" ? "Showing every match appearance with the impact split by phase." : "Showing the selected match only."}</p>
+          </div>
+          <div className="panel-inner manager-table manager-table-shell">
+            <SortableTable rows={breakdownRows} columns={columns} getRowKey={(row) => row.key} />
+          </div>
+        </section>
+      </div>
+    </AppShell>
+  );
+}
+
+function MetricLineCard({
+  metric,
+  maxValue,
+  formatValue = formatNumber
+}: {
+  metric: MetricLine;
+  maxValue: number;
+  formatValue?: (value: number) => string;
+}) {
+  const width = Math.max(0, Math.min(100, safeDivide(metric.value, maxValue) * 100));
+  const fillStyle = metric.accent === "blue" ? { background: "linear-gradient(90deg, #6f83c7 0%, #90a3eb 100%)" } : undefined;
+
+  return (
+    <div className={`metric-line player-metric-line player-metric-${metric.accent ?? "gold"}`}>
+      <div className="label-row">
+        <span>{metric.label}</span>
+        <span>{formatValue(metric.value)}</span>
+      </div>
+      <div className="bar-track">
+        <div className="bar-fill" style={{ width: `${width}%`, ...fillStyle }} />
+      </div>
+    </div>
+  );
+}
+
+function HistoryMetricCell({ value, bars, accent = "gold" }: { value: number; bars: number[]; accent?: "gold" | "blue" }) {
+  return (
+    <div className={`manager-metric-cell manager-metric-${accent}`}>
+      <strong>{formatNumber(value)}</strong>
+      <div className="manager-mini-bars" aria-hidden="true">
+        {bars.map((bar, index) => (
+          <span key={`${accent}-${index}`} style={{ height: `${bar}%` }} />
         ))}
       </div>
-
-      <section className="panel player-breakdown-section">
-        <div className="panel-inner player-breakdown-head">
-          <h3>Per-match breakdown</h3>
-          <p>{activeFilterId === "all" ? "Showing every match the player appeared in." : "Showing the selected match only."}</p>
-        </div>
-        <div className="panel-inner manager-table">
-          <SortableTable rows={breakdownRows} columns={columns} getRowKey={(row) => row.key} />
-        </div>
-      </section>
-    </AppShell>
+    </div>
   );
 }
 
 function sumBy(items: MatchStatRecord[], accessor: (item: MatchStatRecord) => number): number {
   return items.reduce((total, item) => total + accessor(item), 0);
+}
+
+function safeDivide(numerator: number, denominator: number): number {
+  return denominator ? numerator / denominator : 0;
 }
 
 function sortByDateThenMatch(left: MatchStatRecord, right: MatchStatRecord): number {
@@ -238,3 +494,27 @@ function formatNumber(value: number): string {
   const rounded = Math.round(value * 100) / 100;
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2).replace(/\.00$/, "").replace(/(\.\d*[1-9])0+$/, "$1");
 }
+
+function formatPercent(value: number): string {
+  return `${formatNumber(value)}%`;
+}
+
+function buildMiniBarValues(values: number[]): number[] {
+  const source = values.length ? values : [0, 0, 0, 0];
+  const normalized = source.slice(0, 6);
+  while (normalized.length < 6) normalized.push(0);
+  const max = Math.max(...normalized, 1);
+  return normalized.map((value) => 28 + Math.round((Math.max(0, value) / max) * 72));
+}
+
+function getInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  return parts.slice(0, 2).map((part) => part[0]?.toUpperCase() ?? "").join("") || "P";
+}
+
+function getMatchBadge(label: string): string {
+  const match = label.match(/AFL\s*\d+/i);
+  if (match) return match[0].replace(/\s+/g, "");
+  return label.slice(0, 3).toUpperCase();
+}
+

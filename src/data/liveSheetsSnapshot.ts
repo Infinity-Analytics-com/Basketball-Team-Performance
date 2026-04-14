@@ -266,6 +266,7 @@ function parseInputRecords(inputRows: ParsedRow[]): MatchStatRecord[] {
       const opposition = pick(row, ["Opposition", "Opponent", "Opp"]);
       const assistsShots = toNumber(pick(row, ["Assists_Shots", "Assists Shots"]));
       const assistsGoals = toNumber(pick(row, ["Assists_Goals", "Assists Goals"]));
+      const forceTurnoverWin = toNumber(pick(row, ["Force Turnover Win", "Force_Turnover_Win"]));
       const turnoversInContact = toNumber(pick(row, ["Turnovers in Contact", "Turnovers \n in Contact", "Turnovers\nin Contact", "Turnovers inContact"]));
       const turnoverSkillError = toNumber(pick(row, ["Turnover Skill Error", "Turnover_Skill_Error"]));
       const turnoversKickedAway = toNumber(pick(row, ["Turnovers Kicked Away", "Turnovers \n Kicked Away", "Turnovers\nKicked Away"]));
@@ -302,6 +303,7 @@ function parseInputRecords(inputRows: ParsedRow[]): MatchStatRecord[] {
         turnoversInContact,
         turnoverSkillError,
         turnoversKickedAway,
+        forceTurnoverWin,
         turnovers: turnoversInContact + turnoverSkillError + turnoversKickedAway,
         assistsShots,
         assistsGoals,
@@ -311,6 +313,12 @@ function parseInputRecords(inputRows: ParsedRow[]): MatchStatRecord[] {
         twoPointerAttempts: toNumber(pick(row, ["Two_Pointer_Attempts", "Two Pointer Attempts"])),
         twoPointerScored: toNumber(pick(row, ["Two_Pointer_Scored", "Two Pointer Scored"])),
         goalAttempts: toNumber(pick(row, ["Goal_Attempts", "Goal Attempts"])),
+        freeOnePointerAttempts: toNumber(pick(row, ["One_Pointer_Attempts_F", "Free One_Pointer_Attempts", "Free One Pointer Attempts"])),
+        freeOnePointerScored: toNumber(pick(row, ["One_Pointer_Scored_F", "Free One_Pointer_Scored", "Free One Pointer Scored"])),
+        freeTwoPointerAttempts: toNumber(pick(row, ["Two_Pointer_Attempts_F", "Free Two_Pointer_Attempts", "Free Two Pointer Attempts"])),
+        freeTwoPointerScored: toNumber(pick(row, ["Two_Pointer_Scored_F", "Free Two_Pointer_Scored", "Free Two Pointer Scored"])),
+        freeGoalAttempts: toNumber(pick(row, ["Goal_Attempts_F", "Free Goal_Attempts", "Free Goal Attempts"])),
+        freeGoalsScored: toNumber(pick(row, ["Goals_Scored_F", "Free Goals_Scored", "Free Goals Scored"])),
         attackImpact: 0,
         transitionImpact: 0,
         defenseImpact: 0,

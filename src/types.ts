@@ -48,6 +48,7 @@ export interface MatchStatRecord {
   turnoversInContact: number;
   turnoverSkillError: number;
   turnoversKickedAway: number;
+  forceTurnoverWin: number;
   turnovers: number;
   assistsShots: number;
   assistsGoals: number;
@@ -57,6 +58,12 @@ export interface MatchStatRecord {
   twoPointerAttempts: number;
   twoPointerScored: number;
   goalAttempts: number;
+  freeOnePointerAttempts: number;
+  freeOnePointerScored: number;
+  freeTwoPointerAttempts: number;
+  freeTwoPointerScored: number;
+  freeGoalAttempts: number;
+  freeGoalsScored: number;
   attackImpact: number;
   transitionImpact: number;
   defenseImpact: number;
