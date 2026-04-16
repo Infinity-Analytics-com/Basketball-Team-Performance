@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { clearSession, readSession, writeSession, type Session } from "@/auth/session";
 import type { Role } from "@/types";
 import { clearSnapshotCache, hasSnapshotCacheForSession, refreshSnapshot } from "@/api/client";
@@ -13,6 +13,13 @@ const AuthContext = createContext<AuthState | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(() => readSession());
+
+  useEffect(() => {
+    if (!session) return;
+    void refreshSnapshot(session).catch(() => {
+      // Keep the existing session and any usable cache if background refresh fails.
+    });
+  }, [session]);
 
   const value = useMemo<AuthState>(
     () => ({

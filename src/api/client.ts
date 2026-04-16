@@ -3,7 +3,9 @@ import type { SnapshotResponse } from "@/types";
 import type { Session } from "@/auth/session";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
-const SNAPSHOT_CACHE_KEY = "afl-snapshot-cache:v2";
+const STORAGE_VERSION = "v3";
+const SNAPSHOT_CACHE_KEY = `afl-snapshot-cache:${STORAGE_VERSION}`;
+const LEGACY_SNAPSHOT_KEYS = ["afl-snapshot-cache:v2"];
 export const SNAPSHOT_CACHE_UPDATED_EVENT = "snapshot-cache-updated";
 
 interface SnapshotCacheEntry {
@@ -14,6 +16,7 @@ interface SnapshotCacheEntry {
 
 function readCacheEntry(): SnapshotCacheEntry | null {
   try {
+    LEGACY_SNAPSHOT_KEYS.forEach((key) => localStorage.removeItem(key));
     const raw = localStorage.getItem(SNAPSHOT_CACHE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<SnapshotCacheEntry>;
@@ -25,6 +28,7 @@ function readCacheEntry(): SnapshotCacheEntry | null {
 }
 
 function writeCacheEntry(session: Session, snapshot: SnapshotResponse): SnapshotResponse {
+  LEGACY_SNAPSHOT_KEYS.forEach((key) => localStorage.removeItem(key));
   const entry: SnapshotCacheEntry = {
     session: { userId: session.userId, role: session.role, playerId: session.playerId },
     snapshot,
@@ -37,6 +41,7 @@ function writeCacheEntry(session: Session, snapshot: SnapshotResponse): Snapshot
 
 export function clearSnapshotCache() {
   localStorage.removeItem(SNAPSHOT_CACHE_KEY);
+  LEGACY_SNAPSHOT_KEYS.forEach((key) => localStorage.removeItem(key));
 }
 
 export function hasSnapshotCacheForSession(session: Session): boolean {
