@@ -1,50 +1,20 @@
-import { useEffect, useMemo, useState } from "react";
+ï»¿import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { AppShell } from "@/components/Layout";
 import { LoadingCard } from "@/components/LoadingCard";
 import { SortableTable, type SortableTableColumn } from "@/components/SortableTable";
 import { useAuth } from "@/auth/AuthContext";
 import { getSnapshot, refreshSnapshot, SNAPSHOT_CACHE_UPDATED_EVENT } from "@/api/client";
+import {
+  aggregatePlayerRecords,
+  buildMatchOrder,
+  type AggregatedPlayerRow
+} from "@/data/performanceModel";
 import type { MatchStatRecord, SnapshotResponse } from "@/types";
 
 const DATA_ERROR_MESSAGE = "Unable to load data. Please check your API key or connection.";
 const dashboardTabs = ["All Impact", "Attack", "Transition", "Defence", "Turnovers", "Kick Outs"] as const;
 type DashboardTab = (typeof dashboardTabs)[number];
-
-type AggregatedPlayerRow = {
-  playerId: string;
-  name: string;
-  gamesPlayed: number;
-  totalMinutes: number;
-  totalImpact: number;
-  attackImpact: number;
-  transitionImpact: number;
-  defenseImpact: number;
-  onePointAtt: number;
-  onePointScored: number;
-  twoPointAtt: number;
-  twoPointScored: number;
-  goalAtt: number;
-  goalsScored: number;
-  freeScores: number;
-  assists: number;
-  simplePass: number;
-  advancePass: number;
-  carries: number;
-  turnovers: number;
-  turnoversInContact: number;
-  turnoverSkillError: number;
-  turnoversKickedAway: number;
-  forceTurnoverWin: number;
-  tackles: number;
-  duelsContested: number;
-  duelsLost: number;
-  koWinsOur: number;
-  koContestsOur: number;
-  koWinsOpp: number;
-  koContestsOpp: number;
-  matchTrend: Array<{ matchId: string; totalImpact: number; attackImpact: number; transitionImpact: number; defenseImpact: number }>;
-};
 
 type SummaryCard = {
   label: string;
@@ -56,7 +26,7 @@ type LeaderCard = {
   title: string;
   playerName: string;
   value: number;
-  rounds: number[];
+  rounds: Array<{ label: string; value: number }>;
   subtitle: string;
 };
 
@@ -87,13 +57,16 @@ export function ManagerDashboardPage() {
     setActiveMatchFilter((current) => (options.includes(current) ? current : "all"));
   }, [snapshot]);
 
+  const allRecords = snapshot?.records ?? [];
   const visibleRecords = useMemo(
-    () => (activeMatchFilter === "all" ? snapshot?.records ?? [] : (snapshot?.records ?? []).filter((record) => record.matchId === activeMatchFilter)),
-    [snapshot, activeMatchFilter]
+    () => (activeMatchFilter === "all" ? allRecords : allRecords.filter((record) => record.matchId === activeMatchFilter)),
+    [allRecords, activeMatchFilter]
   );
-  const aggregatedRows = useMemo(() => aggregateRows(visibleRecords), [visibleRecords]);
-  const summaryCards = useMemo(() => buildSummaryCards(visibleRecords, aggregatedRows), [visibleRecords, aggregatedRows]);
-  const topPerformers = useMemo(() => buildLeaderCards(aggregatedRows), [aggregatedRows]);
+  const matchOrder = useMemo(() => buildMatchOrder(allRecords), [allRecords]);
+  const aggregatedRows = useMemo(() => aggregatePlayerRecords(visibleRecords, allRecords, matchOrder), [visibleRecords, allRecords, matchOrder]);
+  const sortedRows = useMemo(() => sortRowsForTab(aggregatedRows, activeTab), [aggregatedRows, activeTab]);
+  const summaryCards = useMemo(() => buildSummaryCards(visibleRecords, sortedRows), [visibleRecords, sortedRows]);
+  const topPerformers = useMemo(() => buildLeaderCards(sortedRows), [sortedRows]);
   const columns = useMemo(() => buildColumns(activeTab), [activeTab]);
 
   if (!session) return null;
@@ -115,7 +88,7 @@ export function ManagerDashboardPage() {
           <section className="dashboard-toolbar">
             <div>
               <p className="toolbar-kicker">Manager Dashboard</p>
-              <h2 className="toolbar-title manager-dashboard-title">Staff performance view with the six coaching tabs requested in the meeting</h2>
+              <h2 className="toolbar-title manager-dashboard-title">Staff performance view with live Excel scoring and shared season aggregates</h2>
             </div>
             <div className="filter-toolbar-row">
               <label className="filter-select-inline">
@@ -152,7 +125,12 @@ export function ManagerDashboardPage() {
           </section>
 
           <section className="table panel-inner manager-table manager-table-shell">
-            <SortableTable rows={aggregatedRows} columns={columns} getRowKey={(row) => row.playerId} />
+            <SortableTable rows={sortedRows} columns={columns} getRowKey={(row) => row.playerId} />
+          </section>
+
+          <section className="panel-inner player-breakdown-head">
+            <h3>Season Trends</h3>
+            <p>These cards show the leading player in each phase and how their values moved across recent matches.</p>
           </section>
 
           <section className="performers-grid">
@@ -162,14 +140,9 @@ export function ManagerDashboardPage() {
                 <p>{top.playerName}</p>
                 <strong>{formatNumber(top.value)}</strong>
                 <small className="performer-subtitle">{top.subtitle}</small>
-                <div className="leader-mini-bar" aria-hidden="true">
-                  {buildMiniBarValues(top.rounds).map((bar, index) => (
-                    <span key={`${top.title}-bar-${index}`} style={{ height: `${bar}%` }} />
-                  ))}
-                </div>
-                <div className="round-strip">
-                  {top.rounds.map((value, index) => (
-                    <span key={`${top.title}-${index}`}>{top.rounds.length ? `AFL ${index + 1}` : "AFL"} {formatNumber(value)}</span>
+                <div className="leader-mini-bar" aria-label={`${top.title} per-game trend`}>
+                  {buildMiniBarValues(top.rounds.map((round) => round.value)).map((bar, index) => (
+                    <span key={`${top.title}-bar-${index}`} style={{ height: `${bar}%` }} title={`${top.rounds[index]?.label ?? `AFL ${index + 1}`}: ${formatNumber(top.rounds[index]?.value ?? 0)}`} />
                   ))}
                 </div>
               </article>
@@ -181,118 +154,31 @@ export function ManagerDashboardPage() {
   );
 }
 
-function aggregateRows(records: MatchStatRecord[]): AggregatedPlayerRow[] {
-  const byPlayer = new Map<string, AggregatedPlayerRow & { matchIds: Set<string> }>();
-
-  for (const record of records) {
-    const current = byPlayer.get(record.playerId) ?? {
-      playerId: record.playerId,
-      name: record.playerName,
-      gamesPlayed: 0,
-      totalMinutes: 0,
-      totalImpact: 0,
-      attackImpact: 0,
-      transitionImpact: 0,
-      defenseImpact: 0,
-      onePointAtt: 0,
-      onePointScored: 0,
-      twoPointAtt: 0,
-      twoPointScored: 0,
-      goalAtt: 0,
-      goalsScored: 0,
-      freeScores: 0,
-      assists: 0,
-      simplePass: 0,
-      advancePass: 0,
-      carries: 0,
-      turnovers: 0,
-      turnoversInContact: 0,
-      turnoverSkillError: 0,
-      turnoversKickedAway: 0,
-      forceTurnoverWin: 0,
-      tackles: 0,
-      duelsContested: 0,
-      duelsLost: 0,
-      koWinsOur: 0,
-      koContestsOur: 0,
-      koWinsOpp: 0,
-      koContestsOpp: 0,
-      matchTrend: [],
-      matchIds: new Set<string>()
-    };
-
-    current.matchIds.add(record.matchId);
-    current.totalMinutes += record.totalMinutes;
-    current.totalImpact += record.totalImpact;
-    current.attackImpact += record.attackImpact;
-    current.transitionImpact += record.transitionImpact;
-    current.defenseImpact += record.defenseImpact;
-    current.onePointAtt += record.onePointerAttempts;
-    current.onePointScored += record.onePointerScored;
-    current.twoPointAtt += record.twoPointerAttempts;
-    current.twoPointScored += record.twoPointerScored;
-    current.goalAtt += record.goalAttempts;
-    current.goalsScored += record.goalsScored;
-    current.freeScores += record.freeOnePointerScored + record.freeTwoPointerScored + record.freeGoalsScored;
-    current.assists += record.assists;
-    current.simplePass += record.simplePass;
-    current.advancePass += record.advancePass;
-    current.carries += record.carries;
-    current.turnovers += record.turnovers;
-    current.turnoversInContact += record.turnoversInContact;
-    current.turnoverSkillError += record.turnoverSkillError;
-    current.turnoversKickedAway += record.turnoversKickedAway;
-    current.forceTurnoverWin += record.forceTurnoverWin;
-    current.tackles += record.tackles;
-    current.duelsContested += record.duelsContested;
-    current.duelsLost += record.duelsLost;
-    current.koWinsOur += record.koWinsOur;
-    current.koContestsOur += record.koContestsOur;
-    current.koWinsOpp += record.koWinsOpp;
-    current.koContestsOpp += record.koContestsOpp;
-    current.matchTrend.push({
-      matchId: record.matchId,
-      totalImpact: record.totalImpact,
-      attackImpact: record.attackImpact,
-      transitionImpact: record.transitionImpact,
-      defenseImpact: record.defenseImpact
-    });
-
-    byPlayer.set(record.playerId, current);
-  }
-
-  return Array.from(byPlayer.values())
-    .map(({ matchIds, ...row }) => ({ ...row, gamesPlayed: matchIds.size }))
-    .sort((left, right) => right.totalImpact - left.totalImpact || left.name.localeCompare(right.name));
-}
-
 function buildSummaryCards(records: MatchStatRecord[], rows: AggregatedPlayerRow[]): SummaryCard[] {
   const matchesPlayed = new Set(records.map((record) => record.matchId)).size || 1;
   const koOurWins = records.reduce((sum, record) => sum + record.koWinsOur, 0);
   const koOurContests = records.reduce((sum, record) => sum + record.koContestsOur, 0);
-  const koOppWins = records.reduce((sum, record) => sum + record.koWinsOpp, 0);
-  const koOppContests = records.reduce((sum, record) => sum + record.koContestsOpp, 0);
 
   return [
     {
-      label: "All Impact",
-      value: formatNumber(rows.reduce((sum, row) => sum + row.totalImpact, 0) / (rows.length || 1)),
-      subtitle: "Average overall impact across players"
+      label: "Total Impact",
+      value: formatNumber(rows.reduce((sum, row) => sum + row.totalImpact, 0)),
+      subtitle: "Summed season impact across the visible player set"
     },
     {
-      label: "TO Per Game",
-      value: formatNumber(records.reduce((sum, record) => sum + record.forceTurnoverWin + record.turnoversKickedAway, 0) / matchesPlayed),
-      subtitle: "Force Turnover Win + Kick Away Turnover"
+      label: "Attack Impact",
+      value: formatNumber(rows.reduce((sum, row) => sum + row.attackImpact, 0)),
+      subtitle: "Weighted attack contribution"
+    },
+    {
+      label: "Defence Impact",
+      value: formatNumber(rows.reduce((sum, row) => sum + row.defenseImpact, 0)),
+      subtitle: "Weighted defence contribution"
     },
     {
       label: "KO % OUR",
       value: `${Math.round(safeDivide(koOurWins, koOurContests) * 100)}%`,
-      subtitle: "Our kickout win rate"
-    },
-    {
-      label: "KO % OPP",
-      value: `${Math.round(safeDivide(koOppWins, koOppContests) * 100)}%`,
-      subtitle: "Opposition kickout win rate"
+      subtitle: `Across ${matchesPlayed} visible match${matchesPlayed === 1 ? "" : "es"}`
     }
   ];
 }
@@ -318,7 +204,12 @@ function buildLeaderCard(
     title,
     playerName: winner?.name ?? "-",
     value: winner ? accessor(winner) : 0,
-    rounds: winner ? winner.matchTrend.slice(0, 4).map((trend) => trendAccessor(trend)) : [],
+    rounds: winner
+      ? winner.matchTrend.slice(-6).map((trend) => ({
+          label: trend.matchLabel,
+          value: trendAccessor(trend)
+        }))
+      : [],
     subtitle
   };
 }
@@ -329,12 +220,12 @@ function buildColumns(activeTab: DashboardTab): Array<SortableTableColumn<Aggreg
     label: "Player",
     sortAccessor: (row) => row.name,
     cell: (row, index) => (
-      <div className="manager-player-cell">
+      <div className={`manager-player-cell ${activeTab === "All Impact" ? "manager-player-cell-featured" : ""}`}>
         <span className="manager-player-rank">{index + 1}</span>
         <span className="manager-player-avatar" aria-hidden="true">{getInitials(row.name)}</span>
         <span className="manager-player-meta">
           <Link to={`/player/${row.playerId}`} className="manager-player-link">{row.name}</Link>
-          <small>{row.gamesPlayed} games • {formatNumber(row.totalMinutes)} min</small>
+          <small>{row.gamesPlayed} games / {formatNumber(row.totalMinutes)} min</small>
         </span>
       </div>
     )
@@ -358,162 +249,122 @@ function buildColumns(activeTab: DashboardTab): Array<SortableTableColumn<Aggreg
     case "Attack":
       return [
         playerColumn,
+        numeric("attackImpact", "Attack", (row) => row.attackImpact),
+        numeric("attackImpact60", "ATT 60", (row) => per60(row.attackImpact, row.totalMinutes)),
         numeric("onePointScored", "1PT", (row) => row.onePointScored),
         numeric("twoPointScored", "2PT", (row) => row.twoPointScored),
         numeric("goalsScored", "Goals", (row) => row.goalsScored),
-        numeric("freeScores", "Frees", (row) => row.freeScores),
-        {
-          id: "attackImpact",
-          label: "Impact",
-          sortAccessor: (row) => row.attackImpact,
-          cell: (row) => <MetricCell value={row.attackImpact} bars={buildMiniBarValues([row.onePointScored, row.twoPointScored, row.goalsScored, row.assists])} />,
-          headerClassName: "num",
-          cellClassName: "num"
-        }
+        numeric("freeScores", "Frees", (row) => row.freeScores)
       ];
     case "Transition":
       return [
         playerColumn,
+        numeric("transitionImpact", "Transition", (row) => row.transitionImpact),
+        numeric("transitionImpact60", "TRANS 60", (row) => per60(row.transitionImpact, row.totalMinutes)),
         numeric("simplePass", "Simple Pass", (row) => row.simplePass),
         numeric("advancePass", "Advance Pass", (row) => row.advancePass),
         numeric("carries", "Carries", (row) => row.carries),
-        numeric("turnovers", "Turnovers", (row) => row.turnovers),
-        {
-          id: "transitionImpact",
-          label: "Impact",
-          sortAccessor: (row) => row.transitionImpact,
-          cell: (row) => <MetricCell value={row.transitionImpact} bars={buildMiniBarValues([row.simplePass, row.advancePass, row.carries, row.koContestsOur])} />,
-          headerClassName: "num",
-          cellClassName: "num"
-        }
+        numeric("turnovers", "Turnovers", (row) => row.turnovers)
       ];
     case "Defence":
       return [
         playerColumn,
+        numeric("defenseImpact", "Defence", (row) => row.defenseImpact),
+        numeric("defenseImpact60", "DEF 60", (row) => per60(row.defenseImpact, row.totalMinutes)),
         numeric("tackles", "Tackles", (row) => row.tackles),
         numeric("duelsContested", "Duels", (row) => row.duelsContested),
         numeric("duelsLost", "Duels Lost", (row) => row.duelsLost),
-        numeric("oppKickouts", "Opp KOs", (row) => row.koContestsOpp),
-        {
-          id: "defenseImpact",
-          label: "Impact",
-          sortAccessor: (row) => row.defenseImpact,
-          cell: (row) => <MetricCell value={row.defenseImpact} bars={buildMiniBarValues([row.tackles, row.duelsContested, row.koContestsOpp, row.koWinsOpp])} accent="blue" />,
-          headerClassName: "num",
-          cellClassName: "num"
-        }
+        numeric("forceTurnoverWin", "Forced TO", (row) => row.forceTurnoverWin)
       ];
     case "Turnovers":
       return [
         playerColumn,
-        numeric("forceTurnoverWin", "Force TO Win", (row) => row.forceTurnoverWin),
-        numeric("turnoversKickedAway", "Kick Away TO", (row) => row.turnoversKickedAway),
-        numeric("turnoverSkillError", "Skill Error TO", (row) => row.turnoverSkillError),
+        numeric("turnoverImpact", "TO Score", (row) => row.turnoverImpact),
+        numeric("forceTurnoverWin", "Forced TO", (row) => row.forceTurnoverWin),
         numeric("turnoversInContact", "Contact TO", (row) => row.turnoversInContact),
-        numeric("toPerGame", "TO / Game", (row) => safeDivide(row.forceTurnoverWin + row.turnoversKickedAway, row.gamesPlayed))
+        numeric("turnoverSkillError", "Skill Error TO", (row) => row.turnoverSkillError),
+        numeric("turnoversKickedAway", "Kick Away TO", (row) => row.turnoversKickedAway)
       ];
     case "Kick Outs":
       return [
         playerColumn,
+        numeric("kickoutImpact", "KO Score", (row) => row.kickoutImpact),
         numeric("koContestsOur", "Our KO", (row) => row.koContestsOur),
-        numeric("koOurPct", "Our KO %", (row) => safeDivide(row.koWinsOur, row.koContestsOur) * 100, (value) => `${Math.round(value)}%`),
+        numeric("koOurPct", "Our KO %", (row) => safeDivide(row.koWinsOur, row.koContestsOur) * 100, formatPercent),
         numeric("koContestsOpp", "Opp KO", (row) => row.koContestsOpp),
-        {
-          id: "kickoutSplit",
-          label: "Split",
-          sortAccessor: (row) => safeDivide(row.koWinsOur, row.koContestsOur) - safeDivide(row.koWinsOpp, row.koContestsOpp),
-          cell: (row) => (
-            <SplitPercentCell
-              leftValue={safeDivide(row.koWinsOur, row.koContestsOur) * 100}
-              rightValue={safeDivide(row.koWinsOpp, row.koContestsOpp) * 100}
-            />
-          )
-        },
-        numeric("gamesPlayed", "Games", (row) => row.gamesPlayed)
+        numeric("koOppPct", "Opp KO %", (row) => safeDivide(row.koWinsOpp, row.koContestsOpp) * 100, formatPercent)
       ];
     case "All Impact":
     default:
       return [
         playerColumn,
+        numeric("totalImpact", "Total Impact", (row) => row.totalImpact),
+        numeric("attackImpact60", "ATT 60", (row) => per60(row.attackImpact, row.totalMinutes)),
+        numeric("transitionImpact60", "TRANS 60", (row) => per60(row.transitionImpact, row.totalMinutes)),
+        numeric("defenseImpact60", "DEF 60", (row) => per60(row.defenseImpact, row.totalMinutes)),
+        numeric("koOurPct", "KO OUR %", (row) => safeDivide(row.koWinsOur, row.koContestsOur) * 100, formatPercent),
+        numeric("koOppPct", "KO OPP %", (row) => safeDivide(row.koWinsOpp, row.koContestsOpp) * 100, formatPercent),
         {
-          id: "totalImpact",
-          label: "Total Impact",
-          sortAccessor: (row) => row.totalImpact,
-          cell: (row) => <MetricCell value={row.totalImpact} bars={buildMiniBarValues(row.matchTrend.map((trend) => trend.totalImpact))} />,
-          headerClassName: "num",
-          cellClassName: "num"
-        },
-        {
-          id: "attackImpact",
-          label: "Attack",
-          sortAccessor: (row) => row.attackImpact,
-          cell: (row) => <MetricCell value={row.attackImpact} bars={buildMiniBarValues(row.matchTrend.map((trend) => trend.attackImpact))} />,
-          headerClassName: "num",
-          cellClassName: "num"
-        },
-        {
-          id: "transitionImpact",
-          label: "Transition",
-          sortAccessor: (row) => row.transitionImpact,
-          cell: (row) => <MetricCell value={row.transitionImpact} bars={buildMiniBarValues(row.matchTrend.map((trend) => trend.transitionImpact))} />,
-          headerClassName: "num",
-          cellClassName: "num"
-        },
-        {
-          id: "defenseImpact",
-          label: "Defence",
-          sortAccessor: (row) => row.defenseImpact,
-          cell: (row) => <MetricCell value={row.defenseImpact} bars={buildMiniBarValues(row.matchTrend.map((trend) => trend.defenseImpact))} accent="blue" />,
-          headerClassName: "num",
-          cellClassName: "num"
-        },
-        {
-          id: "gamesPlayed",
+          id: "form",
           label: "Form",
-          sortAccessor: (row) => row.gamesPlayed,
-          cell: (row) => (
-            <SplitPercentCell
-              leftValue={safeDivide(row.koWinsOur, row.koContestsOur) * 100}
-              rightValue={safeDivide(row.koWinsOpp, row.koContestsOpp) * 100}
-            />
-          )
+          sortAccessor: (row) => row.formLast3 ?? row.formSeason ?? -1,
+          cell: (row) => <FormCell last3={row.formLast3} season={row.formSeason} />,
+          headerClassName: "num",
+          cellClassName: "num"
         }
       ];
   }
 }
 
-function MetricCell({ value, bars, accent = "gold" }: { value: number; bars: number[]; accent?: "gold" | "blue" }) {
+function FormCell({ last3, season }: { last3: number | null; season: number | null }) {
+  if (last3 == null || season == null) {
+    return <span className="manager-form-na">N/A</span>;
+  }
+
   return (
-    <div className={`manager-metric-cell manager-metric-${accent}`}>
-      <strong>{formatNumber(value)}</strong>
-      <div className="manager-mini-bars" aria-hidden="true">
-        {bars.map((bar, index) => (
-          <span key={`${accent}-${index}`} style={{ height: `${bar}%` }} />
-        ))}
+    <div className="manager-form-cell">
+      <FormMetric value={last3} />
+      <FormMetric value={season} />
+    </div>
+  );
+}
+
+function FormMetric({ value }: { value: number }) {
+  const delta = Math.max(-100, Math.min(100, value - 100));
+  const width = Math.max(6, Math.min(100, Math.abs(delta)));
+  const side = delta >= 0 ? "right" : "left";
+  const tone = delta >= 0 ? "amber" : "blue";
+
+  return (
+    <div className="manager-form-metric" title={`${formatPercent(value)} vs team average`}>
+      <span className={`manager-form-value ${tone === "amber" ? "" : "manager-percent-blue"}`}>{formatPercent(value)}</span>
+      <div className="manager-form-bar" aria-hidden="true">
+        <i className="manager-form-center" />
+        <b className={`manager-form-fill ${side} ${tone}`} style={{ width: `${width / 2}%` }} />
       </div>
     </div>
   );
 }
 
-function SplitPercentCell({ leftValue, rightValue }: { leftValue: number; rightValue: number }) {
-  return (
-    <div className="manager-percent-split">
-      <span className="manager-percent-value">{Math.round(leftValue)}%</span>
-      <div className="manager-percent-bars" aria-hidden="true">
-        <i style={{ width: `${Math.max(6, Math.min(100, leftValue))}%` }} />
-        <b style={{ width: `${Math.max(6, Math.min(100, rightValue))}%` }} />
-      </div>
-      <span className="manager-percent-value manager-percent-blue">{Math.round(rightValue)}%</span>
-    </div>
-  );
+function sortRowsForTab(rows: AggregatedPlayerRow[], activeTab: DashboardTab): AggregatedPlayerRow[] {
+  const accessor: Record<DashboardTab, (row: AggregatedPlayerRow) => number> = {
+    "All Impact": (row) => row.totalImpact,
+    Attack: (row) => row.attackImpact,
+    Transition: (row) => row.transitionImpact,
+    Defence: (row) => row.defenseImpact,
+    Turnovers: (row) => row.turnoverImpact,
+    "Kick Outs": (row) => row.kickoutImpact
+  };
+
+  return rows.slice().sort((left, right) => accessor[activeTab](right) - accessor[activeTab](left) || left.name.localeCompare(right.name));
 }
 
 function buildMiniBarValues(values: number[]): number[] {
   const source = values.length ? values : [0, 0, 0, 0];
   const normalized = source.slice(0, 6);
   while (normalized.length < 6) normalized.push(0);
-  const max = Math.max(...normalized, 1);
-  return normalized.map((value) => 28 + Math.round((Math.max(0, value) / max) * 72));
+  const max = Math.max(...normalized.map((value) => Math.abs(value)), 1);
+  return normalized.map((value) => 28 + Math.round((Math.abs(value) / max) * 72));
 }
 
 function getInitials(name: string): string {
@@ -525,9 +376,16 @@ function safeDivide(numerator: number, denominator: number): number {
   return denominator ? numerator / denominator : 0;
 }
 
+function per60(value: number, minutes: number): number {
+  return safeDivide(value, minutes) * 60;
+}
+
 function formatNumber(value: number): string {
   if (!Number.isFinite(value)) return "0";
   const rounded = Math.round(value * 100) / 100;
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2).replace(/\.00$/, "").replace(/(\.\d*[1-9])0+$/, "$1");
 }
 
+function formatPercent(value: number): string {
+  return `${formatNumber(value)}%`;
+}

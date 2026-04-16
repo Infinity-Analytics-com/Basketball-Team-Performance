@@ -1,5 +1,14 @@
 ﻿import type { DashboardFilterOption, MatchStatRecord, PerformanceLeaderboardRecord, ShootingLeaderboardRecord, SnapshotResponse } from "@/types";
 import { permissionsForRole } from "@/rbac/permissions";
+import {
+  applyImpactScores,
+  buildFilterOptions as buildSharedFilterOptions,
+  buildMatchOrder,
+  formatMatchLabel as formatSharedMatchLabel,
+  isInvalidMatchId as isSharedInvalidMatchId,
+  matchDedupKey as toMatchDedupKey,
+  normalizeMatchId as toMatchId
+} from "@/data/performanceModel";
 
 const SHEET_ID = "1MP0mzEPAxo-Z9g0lmcipxLepjap6Vu3FSCXhbzaRpSU";
 const TAB_CANDIDATES = {
@@ -147,95 +156,23 @@ function playerId(name: string): string {
 }
 
 function normalizeMatchId(value: string): string {
-  return value.replace(/\s+/g, " ").trim().toUpperCase();
+  return toMatchId(value);
 }
 
 function matchDedupKey(value: string): string {
-  return normalizeMatchId(value).replace(/[^A-Z0-9]/g, "");
+  return toMatchDedupKey(value);
 }
 
 function isInvalidMatchId(value: string): boolean {
-  const normalized = normalizeMatchId(value);
-  if (!normalized) return true;
-  if (/^BATCH\b/i.test(normalized)) return true;
-  if (/^PLAYER\b/i.test(normalized)) return true;
-  return false;
-}
-
-function parseDateValue(value: string): number | null {
-  if (!value) return null;
-  const timestamp = Date.parse(value);
-  return Number.isFinite(timestamp) ? timestamp : null;
+  return isSharedInvalidMatchId(value);
 }
 
 function formatMatchLabel(matchId: string, opposition: string): string {
-  return opposition ? `${matchId} — vs ${opposition}` : matchId;
-}
-
-function buildMatchOrder(records: MatchStatRecord[]): Array<{ matchId: string; opposition: string; date: string; order: number }> {
-  const seen = new Map<string, { matchId: string; opposition: string; date: string; order: number; hasActivity: boolean }>();
-  records.forEach((record, index) => {
-    const key = matchDedupKey(record.matchId);
-    if (!key || isInvalidMatchId(record.matchId)) return;
-    const existing = seen.get(key);
-    const hasActivity =
-      record.totalMinutes > 0 ||
-      record.pts > 0 ||
-      record.goalsScored > 0 ||
-      record.tackles > 0 ||
-      record.duelsContested > 0 ||
-      record.simplePass > 0 ||
-      record.advancePass > 0 ||
-      record.carries > 0 ||
-      record.turnovers > 0 ||
-      record.assists > 0 ||
-      record.totalImpact > 0 ||
-      record.koContestsOur > 0 ||
-      record.koContestsOpp > 0;
-
-    if (!existing) {
-      seen.set(key, {
-        matchId: normalizeMatchId(record.matchId),
-        opposition: record.opposition,
-        date: record.date,
-        order: index,
-        hasActivity
-      });
-      return;
-    }
-
-    existing.hasActivity = existing.hasActivity || hasActivity;
-    if (!existing.opposition && record.opposition) existing.opposition = record.opposition;
-    if (!existing.date && record.date) existing.date = record.date;
-  });
-
-  return Array.from(seen.values())
-    .filter((match) => match.hasActivity)
-    .sort((left, right) => {
-      const leftDate = parseDateValue(left.date);
-      const rightDate = parseDateValue(right.date);
-      if (leftDate != null && rightDate != null && leftDate !== rightDate) {
-        return leftDate - rightDate;
-      }
-      return left.order - right.order;
-    })
-    .map(({ hasActivity: _hasActivity, ...match }) => match);
+  return formatSharedMatchLabel(matchId, opposition);
 }
 
 function buildFilterOptions(records: MatchStatRecord[]): DashboardFilterOption[] {
-  const matches = buildMatchOrder(records);
-  return [
-    {
-      id: "all",
-      label: "All",
-      description: `Combined view across ${matches.length || 1} matches`
-    },
-    ...matches.map((match) => ({
-      id: match.matchId,
-      label: formatMatchLabel(match.matchId, match.opposition),
-      description: match.date ? `${match.matchId} on ${match.date}` : `Filter to ${match.matchId}`
-    }))
-  ];
+  return buildSharedFilterOptions(records);
 }
 
 function getFreeShotCounts(row: ParsedRow) {
@@ -266,24 +203,35 @@ function parseInputRecords(inputRows: ParsedRow[]): MatchStatRecord[] {
       const opposition = pick(row, ["Opposition", "Opponent", "Opp"]);
       const assistsShots = toNumber(pick(row, ["Assists_Shots", "Assists Shots"]));
       const assistsGoals = toNumber(pick(row, ["Assists_Goals", "Assists Goals"]));
-      const forceTurnoverWin = toNumber(pick(row, ["Force Turnover Win", "Force_Turnover_Win"]));
+      const assistsTwoPoints = toNumber(pick(row, ["Assists_2 Points", "Assists_2_Points", "Assists 2 Points"]));
+      const forceTurnoverWin = toNumber(pick(row, ["Force Turnover Win", "Force_Turnover_Win", "Forced TO Win"]));
+      const kickawayToReceived = toNumber(pick(row, ["Kickaway TO Received", "Kickaway_TO_Received"]));
       const turnoversInContact = toNumber(pick(row, ["Turnovers in Contact", "Turnovers \n in Contact", "Turnovers\nin Contact", "Turnovers inContact"]));
       const turnoverSkillError = toNumber(pick(row, ["Turnover Skill Error", "Turnover_Skill_Error"]));
       const turnoversKickedAway = toNumber(pick(row, ["Turnovers Kicked Away", "Turnovers \n Kicked Away", "Turnovers\nKicked Away"]));
-      const koOurP1 = toNumber(pick(row, ["Won Clean P1_OUR"]));
-      const koOurP2 = toNumber(pick(row, ["Won Clean P2_OUR"]));
-      const koOurP3 = toNumber(pick(row, ["Won Clean P3_OUR"]));
-      const koOurBreak = toNumber(pick(row, ["Won Break_OUR"]));
-      const koOppP1 = toNumber(pick(row, ["Won Clean P1_OPP"]));
-      const koOppP2 = toNumber(pick(row, ["Won Clean P2_OPP"]));
-      const koOppP3 = toNumber(pick(row, ["Won Clean P3_OPP"]));
-      const koOppBreak = toNumber(pick(row, ["Won Break_OPP"]));
-      const koWinsOur = koOurP1 + koOurP2 + koOurP3 + koOurBreak;
-      const koWinsOpp = koOppP1 + koOppP2 + koOppP3 + koOppBreak;
-      const koContestsOur = toNumber(pick(row, ["Ko_Contest_Us", "KO Contest Us"])) || koWinsOur;
-      const koContestsOpp = toNumber(pick(row, ["KO_Contest_Opp", "KO Contest Opp"])) || koWinsOpp;
+      const acceptableTurnover = toNumber(pick(row, ["Acceptable Turnover", "Acceptable_Turnover"]));
+      const koWonCleanP1Our = toNumber(pick(row, ["Won Clean P1_OUR"]));
+      const koWonCleanP2Our = toNumber(pick(row, ["Won Clean P2_OUR"]));
+      const koWonCleanP3Our = toNumber(pick(row, ["Won Clean P3_OUR"]));
+      const koWonBreakOur = toNumber(pick(row, ["Won Break_OUR"]));
+      const koWonCleanP1Opp = toNumber(pick(row, ["Won Clean P1_OPP"]));
+      const koWonCleanP2Opp = toNumber(pick(row, ["Won Clean P2_OPP"]));
+      const koWonCleanP3Opp = toNumber(pick(row, ["Won Clean P3_OPP"]));
+      const koWonBreakOpp = toNumber(pick(row, ["Won Break_OPP"]));
+      const koTargetWonClean = toNumber(pick(row, ["KO_TARGET_WON_CLEAN", "KO Target Won Clean"]));
+      const koTargetWonBreak = toNumber(pick(row, ["KO_TARGET_WON_BREAK", "KO Target Won Break"]));
+      const koTargetLostClean = toNumber(pick(row, ["KO_TARGET_LOST_CLEAN", "KO Target Lost Clean"]));
+      const koTargetLostContest = toNumber(pick(row, ["KO_TARGET_LOST_CONTEST", "KO Target Lost Contest"]));
+      const ourKoContestUs = toNumber(pick(row, ["OUR_KO_Contest_Us", "OUR KO Contest Us"]));
+      const ourKoContestOpp = toNumber(pick(row, ["OUR_KO_Contest_Opp", "OUR KO Contest Opp"]));
+      const theirKoContestUs = toNumber(pick(row, ["THEIR_Ko_Contest_Us", "THEIR KO Contest Us"]));
+      const theirKoContestOpp = toNumber(pick(row, ["THEIR_KO_Contest_Opp", "THEIR KO Contest Opp"]));
+      const koWinsOur = koWonCleanP1Our + koWonCleanP2Our + koWonCleanP3Our + koWonBreakOur;
+      const koWinsOpp = koWonCleanP1Opp + koWonCleanP2Opp + koWonCleanP3Opp + koWonBreakOpp;
+      const koContestsOur = toNumber(pick(row, ["Ko_Contest_Us", "KO Contest Us"])) || ourKoContestUs + ourKoContestOpp || koWinsOur;
+      const koContestsOpp = toNumber(pick(row, ["KO_Contest_Opp", "KO Contest Opp"])) || theirKoContestUs + theirKoContestOpp || koWinsOpp;
 
-      return {
+      return applyImpactScores({
         key: `${matchDedupKey(matchId)}|${playerName}|${index}`,
         matchId,
         matchLabel: formatMatchLabel(matchId, opposition),
@@ -293,26 +241,42 @@ function parseInputRecords(inputRows: ParsedRow[]): MatchStatRecord[] {
         playerName,
         totalMinutes: toNumber(pick(row, ["Total Minutes", "TotalMinutes", "Minutes Played", "Minutes"])),
         pts: toNumber(pick(row, ["Pts", "Points"])),
+        simpleReceive: toNumber(pick(row, ["Simple Receive", "Simple_Receive"])),
+        advanceReceive: toNumber(pick(row, ["Advance Receive", "Advance_Receive"])),
         goalsScored: toNumber(pick(row, ["Goals_Scored", "Goals Scored"])),
         tackles: toNumber(pick(row, ["Tackles", "Tackles (no TO)", "Tackles no TO"])),
+        kickawayToReceived,
         duelsContested: toNumber(pick(row, ["Duels Contested", "Duels – Contested", "Duels - Contested"])),
+        defensiveDuelsWon: toNumber(pick(row, ["Defensive Duels - Won", "Defensive Duels – Won", "Defensive Duels Won"])),
+        dne: toNumber(pick(row, ["DNE", "Non Engagement", "Non-Engagement"])),
         duelsLost: toNumber(pick(row, ["Duels Lost", "Duels_Lost"])),
+        breach1v1: toNumber(pick(row, ["Breach 1v1", "Breach_1v1"])),
+        shotFreeConceded: toNumber(pick(row, ["Shot Free Conceded", "Shot_Free_Conceded"])),
+        twoPointFreeConceded: toNumber(pick(row, ["2pt Free Conceded", "Two Point Free Conceded", "2pt_Free_Conceded"])),
+        blackCard: toNumber(pick(row, ["Black Card", "Black_Card"])),
+        redCard: toNumber(pick(row, ["Red Card", "Red_Card"])),
         simplePass: toNumber(pick(row, ["Simple Pass", "Simple_Pass"])),
         advancePass: toNumber(pick(row, ["Advance Pass", "Advance_Pass"])),
         carries: toNumber(pick(row, ["Carries"])),
         turnoversInContact,
         turnoverSkillError,
         turnoversKickedAway,
+        acceptableTurnover,
         forceTurnoverWin,
-        turnovers: turnoversInContact + turnoverSkillError + turnoversKickedAway,
+        turnovers: turnoversInContact + turnoverSkillError + turnoversKickedAway + acceptableTurnover,
         assistsShots,
         assistsGoals,
-        assists: assistsShots + assistsGoals,
+        assistsTwoPoints,
+        assists: assistsShots + assistsGoals + assistsTwoPoints,
         onePointerAttempts: toNumber(pick(row, ["One_Pointer_Attempts", "One Pointer Attempts"])),
         onePointerScored: toNumber(pick(row, ["One_Pointer_Scored", "One Pointer Scored"])),
+        onePointerWide: toNumber(pick(row, ["One_Pointer_Wide", "One Pointer Wide"])),
         twoPointerAttempts: toNumber(pick(row, ["Two_Pointer_Attempts", "Two Pointer Attempts"])),
         twoPointerScored: toNumber(pick(row, ["Two_Pointer_Scored", "Two Pointer Scored"])),
+        twoPointerWide: toNumber(pick(row, ["Two_Pointer_Wide", "Two Pointer Wide"])),
         goalAttempts: toNumber(pick(row, ["Goal_Attempts", "Goal Attempts"])),
+        goalsWide: toNumber(pick(row, ["Goals_Wide", "Goals Wide"])),
+        dropShorts: toNumber(pick(row, ["Drop_Shorts", "Drop Shorts"])),
         freeOnePointerAttempts: toNumber(pick(row, ["One_Pointer_Attempts_F", "Free One_Pointer_Attempts", "Free One Pointer Attempts"])),
         freeOnePointerScored: toNumber(pick(row, ["One_Pointer_Scored_F", "Free One_Pointer_Scored", "Free One Pointer Scored"])),
         freeTwoPointerAttempts: toNumber(pick(row, ["Two_Pointer_Attempts_F", "Free Two_Pointer_Attempts", "Free Two Pointer Attempts"])),
@@ -322,12 +286,30 @@ function parseInputRecords(inputRows: ParsedRow[]): MatchStatRecord[] {
         attackImpact: 0,
         transitionImpact: 0,
         defenseImpact: 0,
+        turnoverImpact: 0,
+        kickoutImpact: 0,
         totalImpact: 0,
+        koWonCleanP1Our,
+        koWonCleanP2Our,
+        koWonCleanP3Our,
+        koWonBreakOur,
+        koWonCleanP1Opp,
+        koWonCleanP2Opp,
+        koWonCleanP3Opp,
+        koWonBreakOpp,
+        koTargetWonClean,
+        koTargetWonBreak,
+        koTargetLostClean,
+        koTargetLostContest,
+        ourKoContestUs,
+        ourKoContestOpp,
+        theirKoContestUs,
+        theirKoContestOpp,
         koWinsOur,
         koContestsOur,
         koWinsOpp,
         koContestsOpp
-      };
+      });
     })
     .filter((record): record is MatchStatRecord => Boolean(record));
 }
@@ -381,7 +363,7 @@ function parseShootingLeaderboardRows(rows: ParsedRow[]): ShootingLeaderboardRec
     .filter((record): record is ShootingLeaderboardRecord => Boolean(record));
 }
 
-function buildFallbackPerformance(records: MatchStatRecord[], categoryRows: ParsedRow[], impactRows: ParsedRow[]): PerformanceLeaderboardRecord[] {
+function buildFallbackPerformance(records: MatchStatRecord[]): PerformanceLeaderboardRecord[] {
   return records.map((record, index) => ({
     key: `${record.key}|perf-fallback|${index}`,
     matchId: record.matchId,
@@ -429,43 +411,6 @@ function buildFallbackShooting(inputRows: ParsedRow[], records: MatchStatRecord[
       freeOverallEvPerShot: safeDivide(freeScoresValue, freeAttempts),
       playOnePointerEv: safeDivide(record.onePointerScored, record.onePointerAttempts),
       freeOnePointerEv: safeDivide(free.freeOnePointerScored, free.freeOnePointerAttempts)
-    };
-  });
-}
-
-function enrichRecords(records: MatchStatRecord[], categoryRows: ParsedRow[], impactRows: ParsedRow[]): MatchStatRecord[] {
-  const categoryByKey = new Map<string, ParsedRow>();
-  const impactByKey = new Map<string, ParsedRow>();
-
-  for (const row of categoryRows) {
-    const playerName = pick(row, ["PlayerName", "Player", "Name"]);
-    if (!playerName) continue;
-    const matchId = parseLeaderboardMatchId(row);
-    categoryByKey.set(`${matchId}|${playerName}`, row);
-  }
-
-  for (const row of impactRows) {
-    const playerName = pick(row, ["PlayerName", "Player", "Name"]);
-    if (!playerName) continue;
-    const matchId = parseLeaderboardMatchId(row);
-    impactByKey.set(`${matchId}|${playerName}`, row);
-  }
-
-  return records.map((record) => {
-    const lookupKey = `${record.matchId}|${record.playerName}`;
-    const category = categoryByKey.get(lookupKey);
-    const impact = impactByKey.get(lookupKey);
-    const attackImpact = category ? toNumber(pick(category, ["Attack Impact", "Attack"])) : record.pts + record.assists;
-    const defenseImpact = category ? toNumber(pick(category, ["Defensive Impact", "Defense Impact", "Defence Impact"])) : record.tackles + record.duelsContested - record.duelsLost;
-    const transitionImpact = category ? toNumber(pick(category, ["Transition Impact", "Transition"])) : record.carries + record.advancePass + record.simplePass * 0.25 - record.turnovers;
-    const totalImpact = impact ? toNumber(pick(impact, ["Total Impact", "Total IMPACT", "Impact"])) : attackImpact + defenseImpact + transitionImpact;
-
-    return {
-      ...record,
-      attackImpact,
-      transitionImpact,
-      defenseImpact,
-      totalImpact
     };
   });
 }
@@ -551,12 +496,10 @@ export async function buildLiveSnapshot(role: SnapshotResponse["auth"]["role"], 
   }
 
   const inputRows = parseRows(tabs.input.values);
-  const categoryRows = tabs.categories ? parseRows(tabs.categories.values) : [];
-  const impactRows = tabs.impact ? parseRows(tabs.impact.values) : [];
   const performanceRows = tabs.performance ? parseRows(tabs.performance.values) : [];
   const shootingRows = tabs.shooting ? parseRows(tabs.shooting.values) : [];
 
-  const records = enrichRecords(parseInputRecords(inputRows), categoryRows, impactRows);
+  const records = parseInputRecords(inputRows);
   const validPlayedMatchIds = new Set(buildMatchOrder(records).map((match) => match.matchId));
   const playedRecords = records.filter((record) => validPlayedMatchIds.has(normalizeMatchId(record.matchId)));
   const availablePlayerIds = Array.from(new Set(playedRecords.map((record) => record.playerId)));
@@ -581,7 +524,7 @@ export async function buildLiveSnapshot(role: SnapshotResponse["auth"]["role"], 
 
   const performanceLeaderboardSource = parsePerformanceLeaderboardRows(performanceRows);
   const shootingLeaderboardSource = parseShootingLeaderboardRows(shootingRows);
-  const fallbackPerformance = buildFallbackPerformance(playedRecords, categoryRows, impactRows);
+  const fallbackPerformance = buildFallbackPerformance(playedRecords);
   const fallbackShooting = buildFallbackShooting(inputRows, playedRecords);
 
   const performanceLeaderboard = (performanceLeaderboardSource.length ? performanceLeaderboardSource : fallbackPerformance).filter((entry) =>

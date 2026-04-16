@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { AppShell } from "@/components/Layout";
 import { LoadingCard } from "@/components/LoadingCard";
 import { SortableTable, type SortableTableColumn } from "@/components/SortableTable";
 import { useAuth } from "@/auth/AuthContext";
 import { getSnapshot, refreshSnapshot, SNAPSHOT_CACHE_UPDATED_EVENT } from "@/api/client";
+import { buildMatchOrder, buildSparklineBars } from "@/data/performanceModel";
 import { canViewPlayer } from "@/rbac/permissions";
 import type { MatchStatRecord, SnapshotResponse } from "@/types";
 
@@ -18,6 +19,7 @@ type BreakdownRow = {
   attackImpact: number;
   transitionImpact: number;
   defenseImpact: number;
+  kickoutImpact: number;
   minutes: number;
   points: number;
   goals: number;
@@ -42,6 +44,13 @@ type SummaryCard = {
   label: string;
   value: number;
   subtitle: string;
+};
+
+type TrendCard = {
+  label: string;
+  total: number;
+  accent?: "gold" | "blue";
+  sparkline: ReturnType<typeof buildSparklineBars>;
 };
 
 export function PlayerProfilePage() {
@@ -103,8 +112,8 @@ export function PlayerProfilePage() {
     );
   }
 
-  const allPlayerRecords = snapshot.records.filter((record) => record.playerId === playerId);
-  const filteredRecords = (activeFilterId === "all" ? allPlayerRecords : allPlayerRecords.filter((record) => record.matchId === activeFilterId)).sort(sortByDateThenMatch);
+  const allPlayerRecords = snapshot.records.filter((record) => record.playerId === playerId).sort(sortByDateThenMatch);
+  const filteredRecords = activeFilterId === "all" ? allPlayerRecords : allPlayerRecords.filter((record) => record.matchId === activeFilterId);
   const player = snapshot.players[playerId] ?? (allPlayerRecords[0] ? { playerId, name: allPlayerRecords[0].playerName, number: "", position: "" } : null);
 
   if (!player) {
@@ -115,37 +124,9 @@ export function PlayerProfilePage() {
     );
   }
 
-  const totals = {
-    appearances: filteredRecords.length,
-    minutes: sumBy(filteredRecords, (record) => record.totalMinutes),
-    points: sumBy(filteredRecords, (record) => record.pts),
-    goals: sumBy(filteredRecords, (record) => record.goalsScored),
-    onePointers: sumBy(filteredRecords, (record) => record.onePointerScored),
-    twoPointers: sumBy(filteredRecords, (record) => record.twoPointerScored),
-    frees: sumBy(filteredRecords, (record) => record.freeOnePointerScored + record.freeTwoPointerScored + record.freeGoalsScored),
-    tackles: sumBy(filteredRecords, (record) => record.tackles),
-    duelsContested: sumBy(filteredRecords, (record) => record.duelsContested),
-    duelsLost: sumBy(filteredRecords, (record) => record.duelsLost),
-    simplePass: sumBy(filteredRecords, (record) => record.simplePass),
-    advancePass: sumBy(filteredRecords, (record) => record.advancePass),
-    carries: sumBy(filteredRecords, (record) => record.carries),
-    turnovers: sumBy(filteredRecords, (record) => record.turnovers),
-    turnoversInContact: sumBy(filteredRecords, (record) => record.turnoversInContact),
-    turnoverSkillError: sumBy(filteredRecords, (record) => record.turnoverSkillError),
-    turnoversKickedAway: sumBy(filteredRecords, (record) => record.turnoversKickedAway),
-    forceTurnoverWin: sumBy(filteredRecords, (record) => record.forceTurnoverWin),
-    assists: sumBy(filteredRecords, (record) => record.assists),
-    assistsShots: sumBy(filteredRecords, (record) => record.assistsShots),
-    assistsGoals: sumBy(filteredRecords, (record) => record.assistsGoals),
-    attackImpact: sumBy(filteredRecords, (record) => record.attackImpact),
-    transitionImpact: sumBy(filteredRecords, (record) => record.transitionImpact),
-    defenseImpact: sumBy(filteredRecords, (record) => record.defenseImpact),
-    totalImpact: sumBy(filteredRecords, (record) => record.totalImpact),
-    koWinsOur: sumBy(filteredRecords, (record) => record.koWinsOur),
-    koContestsOur: sumBy(filteredRecords, (record) => record.koContestsOur),
-    koWinsOpp: sumBy(filteredRecords, (record) => record.koWinsOpp),
-    koContestsOpp: sumBy(filteredRecords, (record) => record.koContestsOpp)
-  };
+  const seasonTotals = buildTotals(allPlayerRecords);
+  const visibleTotals = buildTotals(filteredRecords);
+  const matchOrder = buildMatchOrder(allPlayerRecords);
 
   const breakdownRows: BreakdownRow[] = filteredRecords.map((record) => ({
     key: record.key,
@@ -155,6 +136,7 @@ export function PlayerProfilePage() {
     attackImpact: record.attackImpact,
     transitionImpact: record.transitionImpact,
     defenseImpact: record.defenseImpact,
+    kickoutImpact: record.kickoutImpact,
     minutes: record.totalMinutes,
     points: record.pts,
     goals: record.goalsScored,
@@ -170,61 +152,85 @@ export function PlayerProfilePage() {
   }));
 
   const summaryCards: SummaryCard[] = [
-    { label: "Appearances", value: totals.appearances, subtitle: "Matches played in the selected view" },
-    { label: "Total Minutes", value: totals.minutes, subtitle: "Minutes accumulated across the filter" },
-    { label: "Total Scores", value: totals.onePointers + totals.twoPointers + totals.goals, subtitle: "1PT + 2PT + goals combined" },
-    { label: "Frees Scored", value: totals.frees, subtitle: "Set-piece conversion in the selected view" },
-    { label: "Turnovers", value: totals.turnovers, subtitle: "Total ball losses recorded" }
+    { label: "Season Total Impact", value: seasonTotals.totalImpact, subtitle: "Attack + Transition + Defence across all matches" },
+    { label: "Season Attack", value: seasonTotals.attackImpact, subtitle: "Weighted attack total" },
+    { label: "Season Transition", value: seasonTotals.transitionImpact, subtitle: "Weighted transition total" },
+    { label: "Season Defence", value: seasonTotals.defenseImpact, subtitle: "Weighted defence total" },
+    { label: "Season Kick Outs", value: seasonTotals.kickoutImpact, subtitle: "Weighted kickout contribution" }
+  ];
+
+  const totalMetrics: MetricLine[] = [
+    { label: "Total Impact", value: seasonTotals.totalImpact },
+    { label: "Appearances", value: seasonTotals.appearances },
+    { label: "Minutes", value: seasonTotals.minutes },
+    { label: "Visible Impact", value: visibleTotals.totalImpact },
+    { label: "Visible Minutes", value: visibleTotals.minutes }
   ];
 
   const attackMetrics: MetricLine[] = [
-    { label: "Total Impact", value: totals.totalImpact },
-    { label: "Attack Impact", value: totals.attackImpact },
-    { label: "Points", value: totals.points },
-    { label: "Goals", value: totals.goals },
-    { label: "1-Pointers", value: totals.onePointers },
-    { label: "2-Pointers", value: totals.twoPointers },
-    { label: "Frees Scored", value: totals.frees },
-    { label: "Assists", value: totals.assists }
+    { label: "Attack Impact", value: seasonTotals.attackImpact },
+    { label: "Points", value: seasonTotals.points },
+    { label: "Goals", value: seasonTotals.goals },
+    { label: "1-Pointers", value: seasonTotals.onePointers },
+    { label: "2-Pointers", value: seasonTotals.twoPointers },
+    { label: "Frees Scored", value: seasonTotals.frees },
+    { label: "Assists", value: seasonTotals.assists }
   ];
 
   const transitionMetrics: MetricLine[] = [
-    { label: "Transition Impact", value: totals.transitionImpact, accent: "blue" },
-    { label: "Simple Pass", value: totals.simplePass },
-    { label: "Advance Pass", value: totals.advancePass },
-    { label: "Carries", value: totals.carries },
-    { label: "Assist Shots", value: totals.assistsShots },
-    { label: "Assist Goals", value: totals.assistsGoals }
+    { label: "Transition Impact", value: seasonTotals.transitionImpact },
+    { label: "Simple Pass", value: seasonTotals.simplePass },
+    { label: "Advance Pass", value: seasonTotals.advancePass },
+    { label: "Carries", value: seasonTotals.carries },
+    { label: "Assist Shots", value: seasonTotals.assistsShots },
+    { label: "Assist Goals", value: seasonTotals.assistsGoals }
   ];
 
   const defenceMetrics: MetricLine[] = [
-    { label: "Defence Impact", value: totals.defenseImpact, accent: "blue" },
-    { label: "Tackles", value: totals.tackles },
-    { label: "Duels Contested", value: totals.duelsContested },
-    { label: "Duels Lost", value: totals.duelsLost },
-    { label: "Force TO Win", value: totals.forceTurnoverWin }
+    { label: "Defence Impact", value: seasonTotals.defenseImpact, accent: "blue" },
+    { label: "Tackles", value: seasonTotals.tackles },
+    { label: "Duels Contested", value: seasonTotals.duelsContested },
+    { label: "Duels Lost", value: seasonTotals.duelsLost },
+    { label: "Force TO Win", value: seasonTotals.forceTurnoverWin }
   ];
 
   const kickoutMetrics: MetricLine[] = [
-    { label: "KO % OUR", value: safeDivide(totals.koWinsOur, totals.koContestsOur) * 100 },
-    { label: "OUR Contests", value: totals.koContestsOur },
-    { label: "OUR Wins", value: totals.koWinsOur },
-    { label: "KO % OPP", value: safeDivide(totals.koWinsOpp, totals.koContestsOpp) * 100, accent: "blue" },
-    { label: "OPP Contests", value: totals.koContestsOpp },
-    { label: "OPP Wins", value: totals.koWinsOpp }
+    { label: "Kickout Impact", value: seasonTotals.kickoutImpact },
+    { label: "KO % OUR", value: safeDivide(seasonTotals.koWinsOur, seasonTotals.koContestsOur) * 100 },
+    { label: "OUR Contests", value: seasonTotals.koContestsOur },
+    { label: "OUR Wins", value: seasonTotals.koWinsOur },
+    { label: "KO % OPP", value: safeDivide(seasonTotals.koWinsOpp, seasonTotals.koContestsOpp) * 100, accent: "blue" },
+    { label: "OPP Wins", value: seasonTotals.koWinsOpp }
   ];
 
-  const turnoverMetrics: MetricLine[] = [
-    { label: "Total Turnovers", value: totals.turnovers },
-    { label: "In Contact", value: totals.turnoversInContact },
-    { label: "Skill Error", value: totals.turnoverSkillError },
-    { label: "Kicked Away", value: totals.turnoversKickedAway }
-  ];
-
+  const totalMax = Math.max(...totalMetrics.map((item) => item.value), 1);
   const attackMax = Math.max(...attackMetrics.map((item) => item.value), 1);
   const transitionMax = Math.max(...transitionMetrics.map((item) => item.value), 1);
   const defenceMax = Math.max(...defenceMetrics.map((item) => item.value), 1);
-  const turnoverMax = Math.max(...turnoverMetrics.map((item) => item.value), 1);
+  const kickoutMax = Math.max(...kickoutMetrics.map((item) => item.value), 100);
+  const trendCards: TrendCard[] = [
+    {
+      label: "Total Impact",
+      total: seasonTotals.totalImpact,
+      sparkline: buildSparklineBars(new Map(allPlayerRecords.map((record) => [record.matchId, record.totalImpact])), matchOrder)
+    },
+    {
+      label: "Attack",
+      total: seasonTotals.attackImpact,
+      sparkline: buildSparklineBars(new Map(allPlayerRecords.map((record) => [record.matchId, record.attackImpact])), matchOrder)
+    },
+    {
+      label: "Transition",
+      total: seasonTotals.transitionImpact,
+      sparkline: buildSparklineBars(new Map(allPlayerRecords.map((record) => [record.matchId, record.transitionImpact])), matchOrder)
+    },
+    {
+      label: "Defence",
+      total: seasonTotals.defenseImpact,
+      accent: "blue",
+      sparkline: buildSparklineBars(new Map(allPlayerRecords.map((record) => [record.matchId, record.defenseImpact])), matchOrder)
+    }
+  ];
 
   const showBackButton = session.role === "manager" || session.role === "admin";
   const handleBack = () => {
@@ -261,50 +267,12 @@ export function PlayerProfilePage() {
         </div>
       )
     },
-    {
-      id: "totalImpact",
-      label: "Total Impact",
-      sortAccessor: (row) => row.totalImpact,
-      cell: (row) => <HistoryMetricCell value={row.totalImpact} bars={buildMiniBarValues([row.attackImpact, row.transitionImpact, row.defenseImpact, row.totalImpact])} />,
-      headerClassName: "num",
-      cellClassName: "num"
-    },
-    {
-      id: "attackImpact",
-      label: "Attack",
-      sortAccessor: (row) => row.attackImpact,
-      cell: (row) => <HistoryMetricCell value={row.attackImpact} bars={buildMiniBarValues([row.points, row.goals, row.onePointers, row.twoPointers])} />,
-      headerClassName: "num",
-      cellClassName: "num"
-    },
-    {
-      id: "transitionImpact",
-      label: "Transition",
-      sortAccessor: (row) => row.transitionImpact,
-      cell: (row) => <HistoryMetricCell value={row.transitionImpact} bars={buildMiniBarValues([row.simplePass, row.advancePass, row.carries, row.assists])} />,
-      headerClassName: "num",
-      cellClassName: "num"
-    },
-    {
-      id: "defenseImpact",
-      label: "Defence",
-      sortAccessor: (row) => row.defenseImpact,
-      cell: (row) => <HistoryMetricCell value={row.defenseImpact} bars={buildMiniBarValues([row.tackles, row.turnovers, row.minutes])} accent="blue" />,
-      headerClassName: "num",
-      cellClassName: "num"
-    },
-    { id: "minutes", label: "Minutes", sortAccessor: (row) => row.minutes, cell: (row) => formatNumber(row.minutes), headerClassName: "num", cellClassName: "num" },
-    { id: "points", label: "Points", sortAccessor: (row) => row.points, cell: (row) => formatNumber(row.points), headerClassName: "num", cellClassName: "num" },
-    { id: "goals", label: "Goals", sortAccessor: (row) => row.goals, cell: (row) => formatNumber(row.goals), headerClassName: "num", cellClassName: "num" },
-    { id: "onePointers", label: "1PT", sortAccessor: (row) => row.onePointers, cell: (row) => formatNumber(row.onePointers), headerClassName: "num", cellClassName: "num" },
-    { id: "twoPointers", label: "2PT", sortAccessor: (row) => row.twoPointers, cell: (row) => formatNumber(row.twoPointers), headerClassName: "num", cellClassName: "num" },
-    { id: "frees", label: "Frees", sortAccessor: (row) => row.frees, cell: (row) => formatNumber(row.frees), headerClassName: "num", cellClassName: "num" },
-    { id: "tackles", label: "Tackles", sortAccessor: (row) => row.tackles, cell: (row) => formatNumber(row.tackles), headerClassName: "num", cellClassName: "num" },
-    { id: "simplePass", label: "Simple Pass", sortAccessor: (row) => row.simplePass, cell: (row) => formatNumber(row.simplePass), headerClassName: "num", cellClassName: "num" },
-    { id: "advancePass", label: "Advance Pass", sortAccessor: (row) => row.advancePass, cell: (row) => formatNumber(row.advancePass), headerClassName: "num", cellClassName: "num" },
-    { id: "carries", label: "Carries", sortAccessor: (row) => row.carries, cell: (row) => formatNumber(row.carries), headerClassName: "num", cellClassName: "num" },
-    { id: "turnovers", label: "Turnovers", sortAccessor: (row) => row.turnovers, cell: (row) => formatNumber(row.turnovers), headerClassName: "num", cellClassName: "num" },
-    { id: "assists", label: "Assists", sortAccessor: (row) => row.assists, cell: (row) => formatNumber(row.assists), headerClassName: "num", cellClassName: "num" }
+    numericColumn("totalImpact", "Total Impact", (row) => row.totalImpact),
+    numericColumn("attackImpact", "Attack", (row) => row.attackImpact),
+    numericColumn("transitionImpact", "Transition", (row) => row.transitionImpact),
+    numericColumn("defenseImpact", "Defence", (row) => row.defenseImpact),
+    { id: "kickoutImpact", label: "Kick Outs", sortAccessor: (row) => row.kickoutImpact, cell: (row) => formatNumber(row.kickoutImpact), headerClassName: "num", cellClassName: "num" },
+    { id: "minutes", label: "Minutes", sortAccessor: (row) => row.minutes, cell: (row) => formatNumber(row.minutes), headerClassName: "num", cellClassName: "num" }
   ];
 
   return (
@@ -319,7 +287,7 @@ export function PlayerProfilePage() {
                 <h2 className="player-dashboard-name">{player.name}</h2>
               </div>
             </div>
-            <p className="player-page-meta">Manager-ready player view powered by live Google Sheets data</p>
+            <p className="player-page-meta">Season totals stay fixed to the full campaign. The match filter only changes the per-game breakdown below.</p>
           </div>
           <label className="filter-select-field player-filter-field">
             <span className="filter-select-label">Match</span>
@@ -347,10 +315,25 @@ export function PlayerProfilePage() {
           <article className="panel player-card player-card-featured">
             <div className="player-card-head">
               <div>
+                <p className="player-card-kicker">Season Total</p>
+                <h2>Overall impact</h2>
+              </div>
+              <strong>{formatNumber(seasonTotals.totalImpact)}</strong>
+            </div>
+            <div className="metric-lines">
+              {totalMetrics.map((metric) => (
+                <MetricLineCard key={metric.label} metric={metric} maxValue={totalMax} />
+              ))}
+            </div>
+          </article>
+
+          <article className="panel player-card">
+            <div className="player-card-head">
+              <div>
                 <p className="player-card-kicker">Attack</p>
                 <h2>Output and scoring</h2>
               </div>
-              <strong>{formatNumber(totals.attackImpact)}</strong>
+              <strong>{formatNumber(seasonTotals.attackImpact)}</strong>
             </div>
             <div className="metric-lines">
               {attackMetrics.map((metric) => (
@@ -365,7 +348,7 @@ export function PlayerProfilePage() {
                 <p className="player-card-kicker">Transition</p>
                 <h2>Link play</h2>
               </div>
-              <strong>{formatNumber(totals.transitionImpact)}</strong>
+              <strong>{formatNumber(seasonTotals.transitionImpact)}</strong>
             </div>
             <div className="metric-lines">
               {transitionMetrics.map((metric) => (
@@ -380,7 +363,7 @@ export function PlayerProfilePage() {
                 <p className="player-card-kicker">Defence</p>
                 <h2>Without the ball</h2>
               </div>
-              <strong>{formatNumber(totals.defenseImpact)}</strong>
+              <strong>{formatNumber(seasonTotals.defenseImpact)}</strong>
             </div>
             <div className="metric-lines">
               {defenceMetrics.map((metric) => (
@@ -395,35 +378,49 @@ export function PlayerProfilePage() {
                 <p className="player-card-kicker">Kick Outs</p>
                 <h2>Contest contribution</h2>
               </div>
-              <strong>{formatPercent(safeDivide(totals.koWinsOur, totals.koContestsOur) * 100)}</strong>
+              <strong>{formatNumber(seasonTotals.kickoutImpact)}</strong>
             </div>
             <div className="metric-lines">
               {kickoutMetrics.map((metric) => (
-                <MetricLineCard key={metric.label} metric={metric} maxValue={100} formatValue={metric.label.includes("%") ? formatPercent : formatNumber} />
-              ))}
-            </div>
-          </article>
-
-          <article className="panel player-card">
-            <div className="player-card-head">
-              <div>
-                <p className="player-card-kicker">Turnovers</p>
-                <h2>Ball security</h2>
-              </div>
-              <strong>{formatNumber(totals.turnovers)}</strong>
-            </div>
-            <div className="metric-lines">
-              {turnoverMetrics.map((metric) => (
-                <MetricLineCard key={metric.label} metric={metric} maxValue={turnoverMax} />
+                <MetricLineCard key={metric.label} metric={metric} maxValue={kickoutMax} formatValue={metric.label.includes("%") ? formatPercent : formatNumber} />
               ))}
             </div>
           </article>
         </section>
 
+        <section className="panel player-trend-section">
+          <div className="panel-inner player-breakdown-head">
+            <h3>Season Trend</h3>
+            <p>Each bar is one game in order. Hover to see the match and value. The selected match stays highlighted.</p>
+          </div>
+          <div className="player-trend-grid">
+            {trendCards.map((card) => (
+              <article key={card.label} className="panel-inner player-trend-card">
+                <div className="player-trend-head">
+                  <p className="player-card-kicker">{card.label}</p>
+                  <strong className={card.accent === "blue" ? "player-trend-total player-trend-total-blue" : "player-trend-total"}>
+                    {formatNumber(card.total)}
+                  </strong>
+                </div>
+                <div className={`leader-mini-bar player-trend-bars ${card.accent === "blue" ? "player-trend-blue" : ""}`} aria-label={`${card.label} season trend`}>
+                  {card.sparkline.map((bar, index) => (
+                    <span
+                      key={`${card.label}-${bar.label}-${index}`}
+                      className={`${bar.empty ? "empty" : ""} ${activeFilterId !== "all" && bar.matchId === activeFilterId ? "selected" : ""}`.trim()}
+                      style={{ height: `${Math.max(18, bar.height)}%` }}
+                      title={bar.value == null ? `${bar.label}: not played` : `${bar.label}: ${formatNumber(bar.value)}`}
+                    />
+                  ))}
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+
         <section className="panel player-breakdown-section">
           <div className="panel-inner player-breakdown-head">
-            <h3>Match history</h3>
-            <p>{activeFilterId === "all" ? "Showing every match appearance with the impact split by phase." : "Showing the selected match only."}</p>
+            <h3>Per-game breakdown</h3>
+            <p>{activeFilterId === "all" ? "Showing every match appearance with category values by game." : "Showing the selected match only with clear category values."}</p>
           </div>
           <div className="panel-inner manager-table manager-table-shell">
             <SortableTable rows={breakdownRows} columns={columns} getRowKey={(row) => row.key} />
@@ -432,6 +429,56 @@ export function PlayerProfilePage() {
       </div>
     </AppShell>
   );
+}
+
+function numericColumn<T extends BreakdownRow>(
+  id: string,
+  label: string,
+  accessor: (row: T) => number
+): SortableTableColumn<T> {
+  return {
+    id,
+    label,
+    sortAccessor: accessor,
+    cell: (row) => formatNumber(accessor(row)),
+    headerClassName: "num",
+    cellClassName: "num"
+  };
+}
+
+function buildTotals(records: MatchStatRecord[]) {
+  return {
+    appearances: records.length,
+    minutes: sumBy(records, (record) => record.totalMinutes),
+    points: sumBy(records, (record) => record.pts),
+    goals: sumBy(records, (record) => record.goalsScored),
+    onePointers: sumBy(records, (record) => record.onePointerScored),
+    twoPointers: sumBy(records, (record) => record.twoPointerScored),
+    frees: sumBy(records, (record) => record.freeOnePointerScored + record.freeTwoPointerScored + record.freeGoalsScored),
+    tackles: sumBy(records, (record) => record.tackles),
+    duelsContested: sumBy(records, (record) => record.duelsContested),
+    duelsLost: sumBy(records, (record) => record.duelsLost),
+    simplePass: sumBy(records, (record) => record.simplePass),
+    advancePass: sumBy(records, (record) => record.advancePass),
+    carries: sumBy(records, (record) => record.carries),
+    turnovers: sumBy(records, (record) => record.turnovers),
+    turnoversInContact: sumBy(records, (record) => record.turnoversInContact),
+    turnoverSkillError: sumBy(records, (record) => record.turnoverSkillError),
+    turnoversKickedAway: sumBy(records, (record) => record.turnoversKickedAway),
+    forceTurnoverWin: sumBy(records, (record) => record.forceTurnoverWin),
+    assists: sumBy(records, (record) => record.assists),
+    assistsShots: sumBy(records, (record) => record.assistsShots),
+    assistsGoals: sumBy(records, (record) => record.assistsGoals),
+    attackImpact: sumBy(records, (record) => record.attackImpact),
+    transitionImpact: sumBy(records, (record) => record.transitionImpact),
+    defenseImpact: sumBy(records, (record) => record.defenseImpact),
+    kickoutImpact: sumBy(records, (record) => record.kickoutImpact),
+    totalImpact: sumBy(records, (record) => record.totalImpact),
+    koWinsOur: sumBy(records, (record) => record.koWinsOur),
+    koContestsOur: sumBy(records, (record) => record.koContestsOur),
+    koWinsOpp: sumBy(records, (record) => record.koWinsOpp),
+    koContestsOpp: sumBy(records, (record) => record.koContestsOpp)
+  };
 }
 
 function MetricLineCard({
@@ -454,19 +501,6 @@ function MetricLineCard({
       </div>
       <div className="bar-track">
         <div className="bar-fill" style={{ width: `${width}%`, ...fillStyle }} />
-      </div>
-    </div>
-  );
-}
-
-function HistoryMetricCell({ value, bars, accent = "gold" }: { value: number; bars: number[]; accent?: "gold" | "blue" }) {
-  return (
-    <div className={`manager-metric-cell manager-metric-${accent}`}>
-      <strong>{formatNumber(value)}</strong>
-      <div className="manager-mini-bars" aria-hidden="true">
-        {bars.map((bar, index) => (
-          <span key={`${accent}-${index}`} style={{ height: `${bar}%` }} />
-        ))}
       </div>
     </div>
   );
@@ -499,14 +533,6 @@ function formatPercent(value: number): string {
   return `${formatNumber(value)}%`;
 }
 
-function buildMiniBarValues(values: number[]): number[] {
-  const source = values.length ? values : [0, 0, 0, 0];
-  const normalized = source.slice(0, 6);
-  while (normalized.length < 6) normalized.push(0);
-  const max = Math.max(...normalized, 1);
-  return normalized.map((value) => 28 + Math.round((Math.max(0, value) / max) * 72));
-}
-
 function getInitials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   return parts.slice(0, 2).map((part) => part[0]?.toUpperCase() ?? "").join("") || "P";
@@ -517,4 +543,3 @@ function getMatchBadge(label: string): string {
   if (match) return match[0].replace(/\s+/g, "");
   return label.slice(0, 3).toUpperCase();
 }
-
