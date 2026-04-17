@@ -163,7 +163,7 @@ function buildSummaryCards(records: MatchStatRecord[], rows: AggregatedPlayerRow
     {
       label: "Total Impact",
       value: formatNumber(rows.reduce((sum, row) => sum + row.totalImpact, 0)),
-      subtitle: "Summed season impact across the visible player set"
+      subtitle: "Visible squad season impact"
     },
     {
       label: "Attack Impact",
@@ -218,6 +218,9 @@ function buildColumns(activeTab: DashboardTab): Array<SortableTableColumn<Aggreg
   const playerColumn: SortableTableColumn<AggregatedPlayerRow> = {
     id: "name",
     label: "Player",
+    minWidth: "18rem",
+    maxWidth: "24rem",
+    truncate: true,
     sortAccessor: (row) => row.name,
     cell: (row, index) => (
       <div className={`manager-player-cell ${activeTab === "All Impact" ? "manager-player-cell-featured" : ""}`}>
@@ -235,14 +238,16 @@ function buildColumns(activeTab: DashboardTab): Array<SortableTableColumn<Aggreg
     id: string,
     label: string,
     accessor: (row: AggregatedPlayerRow) => number,
-    formatter: (value: number) => string = formatNumber
+    formatter: (value: number) => string = formatNumber,
+    minWidth = "8rem"
   ): SortableTableColumn<AggregatedPlayerRow> => ({
     id,
     label,
     sortAccessor: accessor,
     cell: (row) => formatter(accessor(row)),
     headerClassName: "num",
-    cellClassName: "num"
+    cellClassName: "num",
+    minWidth
   });
 
   switch (activeTab) {
@@ -307,6 +312,7 @@ function buildColumns(activeTab: DashboardTab): Array<SortableTableColumn<Aggreg
         {
           id: "form",
           label: "Form",
+          minWidth: "12rem",
           sortAccessor: (row) => row.formLast3 ?? row.formSeason ?? -1,
           cell: (row) => <FormCell last3={row.formLast3} season={row.formSeason} />,
           headerClassName: "num",

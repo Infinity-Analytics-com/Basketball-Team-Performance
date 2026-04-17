@@ -256,6 +256,9 @@ export function PlayerProfilePage() {
     {
       id: "matchLabel",
       label: "Match",
+      minWidth: "17rem",
+      maxWidth: "22rem",
+      truncate: true,
       sortAccessor: (row) => `${row.date}|${row.matchLabel}`,
       cell: (row) => (
         <div className="manager-player-cell player-history-match-cell">
@@ -271,8 +274,8 @@ export function PlayerProfilePage() {
     numericColumn("attackImpact", "Attack", (row) => row.attackImpact),
     numericColumn("transitionImpact", "Transition", (row) => row.transitionImpact),
     numericColumn("defenseImpact", "Defence", (row) => row.defenseImpact),
-    { id: "kickoutImpact", label: "Kick Outs", sortAccessor: (row) => row.kickoutImpact, cell: (row) => formatNumber(row.kickoutImpact), headerClassName: "num", cellClassName: "num" },
-    { id: "minutes", label: "Minutes", sortAccessor: (row) => row.minutes, cell: (row) => formatNumber(row.minutes), headerClassName: "num", cellClassName: "num" }
+    { id: "kickoutImpact", label: "Kick Outs", minWidth: "8rem", sortAccessor: (row) => row.kickoutImpact, cell: (row) => formatNumber(row.kickoutImpact), headerClassName: "num", cellClassName: "num" },
+    { id: "minutes", label: "Minutes", minWidth: "7rem", sortAccessor: (row) => row.minutes, cell: (row) => formatNumber(row.minutes), headerClassName: "num", cellClassName: "num" }
   ];
 
   return (
@@ -434,7 +437,8 @@ export function PlayerProfilePage() {
 function numericColumn<T extends BreakdownRow>(
   id: string,
   label: string,
-  accessor: (row: T) => number
+  accessor: (row: T) => number,
+  minWidth = "8rem"
 ): SortableTableColumn<T> {
   return {
     id,
@@ -442,7 +446,8 @@ function numericColumn<T extends BreakdownRow>(
     sortAccessor: accessor,
     cell: (row) => formatNumber(accessor(row)),
     headerClassName: "num",
-    cellClassName: "num"
+    cellClassName: "num",
+    minWidth
   };
 }
 

@@ -14,6 +14,9 @@ export interface SortableTableColumn<T> {
   cell: (row: T, rowIndex: number) => React.ReactNode;
   headerClassName?: string;
   cellClassName?: string;
+  minWidth?: string;
+  maxWidth?: string;
+  truncate?: boolean;
 }
 
 interface SortableTableProps<T> {
@@ -59,10 +62,26 @@ export function SortableTable<T>({ rows, columns, getRowKey }: SortableTableProp
 
   return (
     <table className="data-table">
+      <colgroup>
+        {columns.map((column) => (
+          <col
+            key={`col-${column.id}`}
+            style={{
+              width: column.minWidth,
+              minWidth: column.minWidth,
+              maxWidth: column.maxWidth
+            }}
+          />
+        ))}
+      </colgroup>
       <thead>
         <tr>
           {columns.map((column) => (
-            <th key={column.id} className={column.headerClassName}>
+            <th
+              key={column.id}
+              className={[column.headerClassName, column.truncate ? "truncate-cell" : ""].filter(Boolean).join(" ")}
+              style={{ minWidth: column.minWidth, maxWidth: column.maxWidth }}
+            >
               <button type="button" className="column-sort" onClick={() => toggleSort(column.id)}>
                 {column.label}
                 {sortIndicator(column.id)}
@@ -75,7 +94,11 @@ export function SortableTable<T>({ rows, columns, getRowKey }: SortableTableProp
         {sortedRows.map((row, rowIndex) => (
           <tr key={getRowKey(row)}>
             {columns.map((column) => (
-              <td key={`${getRowKey(row)}-${column.id}`} className={column.cellClassName}>
+              <td
+                key={`${getRowKey(row)}-${column.id}`}
+                className={[column.cellClassName, column.truncate ? "truncate-cell" : ""].filter(Boolean).join(" ")}
+                style={{ minWidth: column.minWidth, maxWidth: column.maxWidth }}
+              >
                 {column.cell(row, rowIndex)}
               </td>
             ))}
