@@ -126,6 +126,7 @@ export function PlayerProfilePage() {
 
   const seasonTotals = buildTotals(allPlayerRecords);
   const visibleTotals = buildTotals(filteredRecords);
+  const hasVisibleStats = filteredRecords.length > 0;
   const matchOrder = buildMatchOrder(allPlayerRecords);
 
   const breakdownRows: BreakdownRow[] = filteredRecords.map((record) => ({
@@ -304,131 +305,142 @@ export function PlayerProfilePage() {
           </label>
         </section>
 
-        <section className="kpi-grid player-kpi-grid">
-          {summaryCards.map((card, index) => (
-            <article key={card.label} className={`kpi-card panel-inner player-overview-card player-overview-card-${index + 1}`}>
-              <h3>{card.label}</h3>
-              <p className="kpi-value">{formatNumber(card.value)}</p>
-              <span>{card.subtitle}</span>
-            </article>
-          ))}
-        </section>
-
-        <section className="player-screen-grid">
-          <article className="panel player-card player-card-featured">
-            <div className="player-card-head">
-              <div>
-                <p className="player-card-kicker">Season Total</p>
-                <h2>Overall impact</h2>
-              </div>
-              <strong>{formatNumber(seasonTotals.totalImpact)}</strong>
-            </div>
-            <div className="metric-lines">
-              {totalMetrics.map((metric) => (
-                <MetricLineCard key={metric.label} metric={metric} maxValue={totalMax} />
+        {hasVisibleStats ? (
+          <>
+            <section className="kpi-grid player-kpi-grid">
+              {summaryCards.map((card, index) => (
+                <article key={card.label} className={`kpi-card panel-inner player-overview-card player-overview-card-${index + 1}`}>
+                  <h3>{card.label}</h3>
+                  <p className="kpi-value">{formatNumber(card.value)}</p>
+                  <span>{card.subtitle}</span>
+                </article>
               ))}
-            </div>
-          </article>
+            </section>
 
-          <article className="panel player-card">
-            <div className="player-card-head">
-              <div>
-                <p className="player-card-kicker">Attack</p>
-                <h2>Output and scoring</h2>
-              </div>
-              <strong>{formatNumber(seasonTotals.attackImpact)}</strong>
-            </div>
-            <div className="metric-lines">
-              {attackMetrics.map((metric) => (
-                <MetricLineCard key={metric.label} metric={metric} maxValue={attackMax} />
-              ))}
-            </div>
-          </article>
-
-          <article className="panel player-card">
-            <div className="player-card-head">
-              <div>
-                <p className="player-card-kicker">Transition</p>
-                <h2>Link play</h2>
-              </div>
-              <strong>{formatNumber(seasonTotals.transitionImpact)}</strong>
-            </div>
-            <div className="metric-lines">
-              {transitionMetrics.map((metric) => (
-                <MetricLineCard key={metric.label} metric={metric} maxValue={transitionMax} />
-              ))}
-            </div>
-          </article>
-
-          <article className="panel player-card">
-            <div className="player-card-head">
-              <div>
-                <p className="player-card-kicker">Defence</p>
-                <h2>Without the ball</h2>
-              </div>
-              <strong>{formatNumber(seasonTotals.defenseImpact)}</strong>
-            </div>
-            <div className="metric-lines">
-              {defenceMetrics.map((metric) => (
-                <MetricLineCard key={metric.label} metric={metric} maxValue={defenceMax} />
-              ))}
-            </div>
-          </article>
-
-          <article className="panel player-card">
-            <div className="player-card-head">
-              <div>
-                <p className="player-card-kicker">Kick Outs</p>
-                <h2>Contest contribution</h2>
-              </div>
-              <strong>{formatNumber(seasonTotals.kickoutImpact)}</strong>
-            </div>
-            <div className="metric-lines">
-              {kickoutMetrics.map((metric) => (
-                <MetricLineCard key={metric.label} metric={metric} maxValue={kickoutMax} formatValue={metric.label.includes("%") ? formatPercent : formatNumber} />
-              ))}
-            </div>
-          </article>
-        </section>
-
-        <section className="panel player-trend-section">
-          <div className="panel-inner player-breakdown-head">
-            <h3>Season Trend</h3>
-            <p>Each bar is one game in order. Hover to see the match and value. The selected match stays highlighted.</p>
-          </div>
-          <div className="player-trend-grid">
-            {trendCards.map((card) => (
-              <article key={card.label} className="panel-inner player-trend-card">
-                <div className="player-trend-head">
-                  <p className="player-card-kicker">{card.label}</p>
-                  <strong className={card.accent === "blue" ? "player-trend-total player-trend-total-blue" : "player-trend-total"}>
-                    {formatNumber(card.total)}
-                  </strong>
+            <section className="player-screen-grid">
+              <article className="panel player-card player-card-featured">
+                <div className="player-card-head">
+                  <div>
+                    <p className="player-card-kicker">Season Total</p>
+                    <h2>Overall impact</h2>
+                  </div>
+                  <strong>{formatNumber(seasonTotals.totalImpact)}</strong>
                 </div>
-                <div className={`leader-mini-bar player-trend-bars ${card.accent === "blue" ? "player-trend-blue" : ""}`} aria-label={`${card.label} season trend`}>
-                  {card.sparkline.map((bar, index) => (
-                    <span
-                      key={`${card.label}-${bar.label}-${index}`}
-                      className={`${bar.empty ? "empty" : ""} ${activeFilterId !== "all" && bar.matchId === activeFilterId ? "selected" : ""}`.trim()}
-                      style={{ height: `${Math.max(18, bar.height)}%` }}
-                      title={bar.value == null ? `${bar.label}: not played` : `${bar.label}: ${formatNumber(bar.value)}`}
-                    />
+                <div className="metric-lines">
+                  {totalMetrics.map((metric) => (
+                    <MetricLineCard key={metric.label} metric={metric} maxValue={totalMax} />
                   ))}
                 </div>
               </article>
-            ))}
-          </div>
-        </section>
 
-        <section className="panel player-breakdown-section">
-          <div className="panel-inner player-breakdown-head">
-            <h3>Per-game breakdown</h3>
-            <p>{activeFilterId === "all" ? "Showing every match appearance with category values by game." : "Showing the selected match only with clear category values."}</p>
-          </div>
-          <div className="panel-inner manager-table manager-table-shell">
-            <SortableTable rows={breakdownRows} columns={columns} getRowKey={(row) => row.key} />
-          </div>
-        </section>
+              <article className="panel player-card">
+                <div className="player-card-head">
+                  <div>
+                    <p className="player-card-kicker">Attack</p>
+                    <h2>Output and scoring</h2>
+                  </div>
+                  <strong>{formatNumber(seasonTotals.attackImpact)}</strong>
+                </div>
+                <div className="metric-lines">
+                  {attackMetrics.map((metric) => (
+                    <MetricLineCard key={metric.label} metric={metric} maxValue={attackMax} />
+                  ))}
+                </div>
+              </article>
+
+              <article className="panel player-card">
+                <div className="player-card-head">
+                  <div>
+                    <p className="player-card-kicker">Transition</p>
+                    <h2>Link play</h2>
+                  </div>
+                  <strong>{formatNumber(seasonTotals.transitionImpact)}</strong>
+                </div>
+                <div className="metric-lines">
+                  {transitionMetrics.map((metric) => (
+                    <MetricLineCard key={metric.label} metric={metric} maxValue={transitionMax} />
+                  ))}
+                </div>
+              </article>
+
+              <article className="panel player-card">
+                <div className="player-card-head">
+                  <div>
+                    <p className="player-card-kicker">Defence</p>
+                    <h2>Without the ball</h2>
+                  </div>
+                  <strong>{formatNumber(seasonTotals.defenseImpact)}</strong>
+                </div>
+                <div className="metric-lines">
+                  {defenceMetrics.map((metric) => (
+                    <MetricLineCard key={metric.label} metric={metric} maxValue={defenceMax} />
+                  ))}
+                </div>
+              </article>
+
+              <article className="panel player-card">
+                <div className="player-card-head">
+                  <div>
+                    <p className="player-card-kicker">Kick Outs</p>
+                    <h2>Contest contribution</h2>
+                  </div>
+                  <strong>{formatNumber(seasonTotals.kickoutImpact)}</strong>
+                </div>
+                <div className="metric-lines">
+                  {kickoutMetrics.map((metric) => (
+                    <MetricLineCard key={metric.label} metric={metric} maxValue={kickoutMax} formatValue={metric.label.includes("%") ? formatPercent : formatNumber} />
+                  ))}
+                </div>
+              </article>
+            </section>
+
+            <section className="panel player-trend-section">
+              <div className="panel-inner player-breakdown-head">
+                <h3>Season Trend</h3>
+                <p>Each bar is one game in order. Hover to see the match and value. The selected match stays highlighted.</p>
+              </div>
+              <div className="player-trend-grid">
+                {trendCards.map((card) => (
+                  <article key={card.label} className="panel-inner player-trend-card">
+                    <div className="player-trend-head">
+                      <p className="player-card-kicker">{card.label}</p>
+                      <strong className={card.accent === "blue" ? "player-trend-total player-trend-total-blue" : "player-trend-total"}>
+                        {formatNumber(card.total)}
+                      </strong>
+                    </div>
+                    <div className={`leader-mini-bar player-trend-bars ${card.accent === "blue" ? "player-trend-blue" : ""}`} aria-label={`${card.label} season trend`}>
+                      {card.sparkline.map((bar, index) => (
+                        <span
+                          key={`${card.label}-${bar.label}-${index}`}
+                          className={`${bar.empty ? "empty" : ""} ${activeFilterId !== "all" && bar.matchId === activeFilterId ? "selected" : ""}`.trim()}
+                          style={{ height: `${Math.max(18, bar.height)}%` }}
+                          title={bar.value == null ? `${bar.label}: not played` : `${bar.label}: ${formatNumber(bar.value)}`}
+                        />
+                      ))}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+
+            <section className="panel player-breakdown-section">
+              <div className="panel-inner player-breakdown-head">
+                <h3>Per-game breakdown</h3>
+                <p>{activeFilterId === "all" ? "Showing every match appearance with category values by game." : "Showing the selected match only with clear category values."}</p>
+              </div>
+              <div className="panel-inner manager-table manager-table-shell">
+                <SortableTable rows={breakdownRows} columns={columns} getRowKey={(row) => row.key} />
+              </div>
+            </section>
+          </>
+        ) : (
+          <section className="panel player-empty-state" role="status">
+            <div className="panel-inner player-breakdown-head">
+              <h3>No stats available</h3>
+              <p>This player did not appear in the selected match, so there are no stats to display.</p>
+            </div>
+          </section>
+        )}
       </div>
     </AppShell>
   );

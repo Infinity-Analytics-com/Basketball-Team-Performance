@@ -65,6 +65,7 @@ export function ManagerDashboardPage() {
   const matchOrder = useMemo(() => buildMatchOrder(allRecords), [allRecords]);
   const aggregatedRows = useMemo(() => aggregatePlayerRecords(visibleRecords, allRecords, matchOrder), [visibleRecords, allRecords, matchOrder]);
   const sortedRows = useMemo(() => sortRowsForTab(aggregatedRows, activeTab), [aggregatedRows, activeTab]);
+  const hasVisibleStats = visibleRecords.length > 0;
   const summaryCards = useMemo(() => buildSummaryCards(visibleRecords, sortedRows), [visibleRecords, sortedRows]);
   const topPerformers = useMemo(() => buildLeaderCards(sortedRows), [sortedRows]);
   const columns = useMemo(() => buildColumns(activeTab), [activeTab]);
@@ -104,50 +105,61 @@ export function ManagerDashboardPage() {
             </div>
           </section>
 
-          <section className="kpi-grid">
-            {summaryCards.map((card, index) => (
-              <article key={card.label} className={`kpi-card panel-inner kpi-card-${index + 1}`}>
-                <h3>{card.label}</h3>
-                <p className="kpi-value">{card.value}</p>
-                <span>{card.subtitle}</span>
-              </article>
-            ))}
-          </section>
+          {hasVisibleStats ? (
+            <>
+              <section className="kpi-grid">
+                {summaryCards.map((card, index) => (
+                  <article key={card.label} className={`kpi-card panel-inner kpi-card-${index + 1}`}>
+                    <h3>{card.label}</h3>
+                    <p className="kpi-value">{card.value}</p>
+                    <span>{card.subtitle}</span>
+                  </article>
+                ))}
+              </section>
 
-          <section className="panel-inner dashboard-section-heading">
-            <div className="tabs-row" role="tablist" aria-label="Manager dashboard tabs">
-              {dashboardTabs.map((tab) => (
-                <button key={tab} type="button" className={activeTab === tab ? "tab active" : "tab"} onClick={() => setActiveTab(tab)}>
-                  {tab}
-                </button>
-              ))}
-            </div>
-          </section>
-
-          <section className="table panel-inner manager-table manager-table-shell">
-            <SortableTable rows={sortedRows} columns={columns} getRowKey={(row) => row.playerId} />
-          </section>
-
-          <section className="panel-inner player-breakdown-head">
-            <h3>Season Trends</h3>
-            <p>These cards show the leading player in each phase and how their values moved across recent matches.</p>
-          </section>
-
-          <section className="performers-grid">
-            {topPerformers.map((top) => (
-              <article className="performer panel-inner" key={top.title}>
-                <h4>{top.title}</h4>
-                <p>{top.playerName}</p>
-                <strong>{formatNumber(top.value)}</strong>
-                <small className="performer-subtitle">{top.subtitle}</small>
-                <div className="leader-mini-bar" aria-label={`${top.title} per-game trend`}>
-                  {buildMiniBarValues(top.rounds.map((round) => round.value)).map((bar, index) => (
-                    <span key={`${top.title}-bar-${index}`} style={{ height: `${bar}%` }} title={`${top.rounds[index]?.label ?? `AFL ${index + 1}`}: ${formatNumber(top.rounds[index]?.value ?? 0)}`} />
+              <section className="panel-inner dashboard-section-heading">
+                <div className="tabs-row" role="tablist" aria-label="Manager dashboard tabs">
+                  {dashboardTabs.map((tab) => (
+                    <button key={tab} type="button" className={activeTab === tab ? "tab active" : "tab"} onClick={() => setActiveTab(tab)}>
+                      {tab}
+                    </button>
                   ))}
                 </div>
-              </article>
-            ))}
-          </section>
+              </section>
+
+              <section className="table panel-inner manager-table manager-table-shell">
+                <SortableTable rows={sortedRows} columns={columns} getRowKey={(row) => row.playerId} />
+              </section>
+
+              <section className="panel-inner player-breakdown-head">
+                <h3>Season Trends</h3>
+                <p>These cards show the leading player in each phase and how their values moved across recent matches.</p>
+              </section>
+
+              <section className="performers-grid">
+                {topPerformers.map((top) => (
+                  <article className="performer panel-inner" key={top.title}>
+                    <h4>{top.title}</h4>
+                    <p>{top.playerName}</p>
+                    <strong>{formatNumber(top.value)}</strong>
+                    <small className="performer-subtitle">{top.subtitle}</small>
+                    <div className="leader-mini-bar" aria-label={`${top.title} per-game trend`}>
+                      {buildMiniBarValues(top.rounds.map((round) => round.value)).map((bar, index) => (
+                        <span key={`${top.title}-bar-${index}`} style={{ height: `${bar}%` }} title={`${top.rounds[index]?.label ?? `AFL ${index + 1}`}: ${formatNumber(top.rounds[index]?.value ?? 0)}`} />
+                      ))}
+                    </div>
+                  </article>
+                ))}
+              </section>
+            </>
+          ) : (
+            <section className="panel dashboard-empty-state" role="status">
+              <div className="panel-inner player-breakdown-head">
+                <h3>No stats available</h3>
+                <p>No played data is available for the selected match, so there are no manager stats to display.</p>
+              </div>
+            </section>
+          )}
         </div>
       )}
     </AppShell>
@@ -369,8 +381,16 @@ function buildMiniBarValues(values: number[]): number[] {
   const source = values.length ? values : [0, 0, 0, 0];
   const normalized = source.slice(0, 6);
   while (normalized.length < 6) normalized.push(0);
-  const max = Math.max(...normalized.map((value) => Math.abs(value)), 1);
-  return normalized.map((value) => 28 + Math.round((Math.abs(value) / max) * 72));
+  const absoluteValues = normalized.map((value) => Math.abs(value));
+  const max = Math.max(...absoluteValues, 0);
+  if (max === 0) {
+    return normalized.map(() => 0);
+  }
+  return normalized.map((value) => {
+    const magnitude = Math.abs(value);
+    if (magnitude === 0) return 0;
+    return 20 + Math.round((magnitude / max) * 80);
+  });
 }
 
 function getInitials(name: string): string {

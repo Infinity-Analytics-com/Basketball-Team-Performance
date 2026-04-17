@@ -57,7 +57,7 @@ export function SortableTable<T>({ rows, columns, getRowKey }: SortableTableProp
 
   const sortIndicator = (columnId: string) => {
     if (!sortState || sortState.columnId !== columnId) return "";
-    return sortState.direction === "asc" ? " ?" : " ?";
+    return sortState.direction === "asc" ? " ↑" : " ↓";
   };
 
   return (
